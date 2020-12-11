@@ -1,6 +1,21 @@
 # auto_instructor
 DCON2021
 
+## 開発環境
+
+* Python3.8+Pipenv
+* PyTorch
+
+## Pipenv設定
+
+* プロジェクトのディレクトリ内に`.venv`を作成する
+
+`$ export PIPENV_VENV_IN_PROJECT=1`
+
+* Lockingをしない
+
+`$ export PIPENV_SKIP_LOCK=1`
+
 ## 運用方法
 
 多分 ↓ のやり方がベストプラクティスです．
