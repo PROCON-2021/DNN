@@ -20,13 +20,19 @@ DCON2021
 
 多分 ↓ のやり方がベストプラクティスです．
 
-このリポジトリをForkしてブランチを切り開発．実装が完了したら`origin/main`ブランチにマージ -> PRを投げて`upstream/main`にマージ
+このリポジトリをForkしてブランチを切り開発．実装が完了したら`upstream/main`にPRを投げる -> マージされたら`origin/main`を更新（pull）
 
 ### upstreamを追加
 `$ git remote add upstream https://github.com/kitamura-laboratory/auto_instructor`
 
 ### リポジトリのURLを確認
 `$ git remote -V`
+
+### upstreamの更新をoriginに持ってくる
+```
+$ git fetch upstream
+$ git merge upstream/master
+```
 
 ## コーディングルール
 
