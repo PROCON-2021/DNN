@@ -1,7 +1,6 @@
 import numpy as np
 
-def main():
-    
+def main(n, key):
     dlen = 10000 # 信号長
 
     mean = 0.0   
@@ -16,7 +15,11 @@ def main():
     # shape: len x ch
     sig = np.stack([sig1, sig2, sig3, sig4], axis=1)
 
-    np.savetxt('./sig.npy', sig, delimiter=',')
+    output_name = ['../dataset/', key, '_sig', str(n), '.npy']
+    np.savetxt(''.join(output_name), sig, delimiter=',')
 
 if __name__ == "__main__":
-    main()
+    
+    for key in ['patience' ,'trainee']:
+        for n in range(20):
+            main(n, key)
