@@ -48,15 +48,32 @@ class MyDataset(Dataset):
 if __name__ == "__main__":
 
     batch_size = 10
+    shift_size = 2
+    frame_range = 200
 
     path = 'dataset/'
 
     dataset = MyDataset(path)
     dataloader = DataLoader(dataset, batch_size, shuffle=True)
 
+    # 信号長を取得
+    data, _ = dataset[0]
+    siglen = data.shape[0]
+
     for i, data in enumerate(dataloader):
         # shape: batch_size x siglen x ch
         inputs, labels = data
 
-        print(inputs.shape)
-        print(labels.shape)
+        # 任意の区間（frame_range）に信号をカットしDNNに入力
+        # shift_sizeずつ区間をずらす
+        for idx in range(0, siglen-frame_range, shift_size):
+
+            # shape: batch_size x frame_range x ch
+            input = inputs[:,idx:idx+frame_range,:]
+            label = labels[:,idx:idx+frame_range,:]
+
+            # ここで推論とback prop.を行う
+            # output = model(input)
+            #    .
+            #    .
+            #    .
