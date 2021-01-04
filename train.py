@@ -3,6 +3,7 @@
 #-----------------------------------------
 import os
 import numpy as np
+import numpy as np
 #import cloudpickle
 import sys
 #import soundfile as sf
@@ -38,7 +39,7 @@ class DataSet(torch.utils.data.Dataset):
         self.transform = transform
         self.data = []
         self.label = []
-        
+
         for _ in range(200):
             input_data = torch.rand([3,100], dtype= torch.float)
             target     = torch.eye(2)[0]
@@ -113,10 +114,10 @@ if __name__ == "__main__":
     train_accu = []
     train_i,val_i = 0,0
     BATCH_SIZE  = 128 # 1つのミニバッチのデータの数
-    
+
     train_data_set = DataSet()
     valid_data_set = DataSet()
-    
+
     train_size = (len(train_data_set)//BATCH_SIZE)*BATCH_SIZE
     train_data_set, dust = torch.utils.data.random_split(train_data_set, [train_size, len(train_data_set)-train_size])
     valid_size = (len(valid_data_set)//BATCH_SIZE)*BATCH_SIZE
@@ -150,7 +151,7 @@ if __name__ == "__main__":
             in_data = in_data.to(device)
             labels = labels.to(device)
             optimizer.zero_grad()
-            
+
             #Prediction
             pred_y = model(in_data)
 
@@ -178,7 +179,7 @@ if __name__ == "__main__":
             in_data = in_data.to(device)
             labels = labels.to(device)
             with torch.no_grad():
-                
+
                 #Prediction
                 pred_y = model(in_data)
 
@@ -195,13 +196,13 @@ if __name__ == "__main__":
         val_acc_list.append(val_accu)
 
         print("Epoc:{}, val_accu:{}, val_loss:{}".format(epoc, val_accu, val_loss))
-        
+
         if val_acc>=0.970:
             break
     #with open('./Output/trained_model/model_est_subband.pkl', 'wb') as f:
     #    cloudpickle.dump(model, f)
-    
-    
+
+
 #tensorboard 機動コマンド
 #tensorboard --logdir runs/
 
