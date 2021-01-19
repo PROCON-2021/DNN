@@ -28,7 +28,7 @@ import csv
 from tqdm import tqdm
 
 #print(torch.__version__) # 0.4.0
-#tensorboard 機動コマンド
+#tensorboard 機動com
 #tensorboard --logdir runs/
 
 #-----------------------------------------
@@ -41,6 +41,7 @@ class DataSet(torch.utils.data.Dataset):
         self.label = []
 
         for _ in range(200):
+            
             input_data = torch.rand([3,100], dtype= torch.float)
             target     = torch.eye(2)[0]
             self.data.append(input_data)
@@ -201,7 +202,6 @@ if __name__ == "__main__":
             break
     #with open('./Output/trained_model/model_est_subband.pkl', 'wb') as f:
     #    cloudpickle.dump(model, f)
-
 
 #tensorboard 機動コマンド
 #tensorboard --logdir runs/
