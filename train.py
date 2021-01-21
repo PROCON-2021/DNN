@@ -1,71 +1,43 @@
 #-----------------------------------------
 # import
 #-----------------------------------------
-import os
+from itertools import count
+import os, sys
 import numpy as np
-import numpy as np
-#import cloudpickle
-import sys
-#import soundfile as sf
-#import pylab as plt
-#import wave
-#import struct
-from scipy import fromstring, int16,signal
-import random
-#import pickle
-#import glob
-import time
+from tqdm import tqdm
+
+import multiprocessing
+multiprocessing.set_start_method('spawn', True)
+
 import torch
 import torch.nn as nn
 import torch.optim as optim
-from torch.autograd import Variable
 import torch.nn.functional as F
-import multiprocessing
-multiprocessing.set_start_method('spawn', True)
-import csv
+from torch.autograd import Variable
+
+from datasetloader import MyDataset
+
 #from torch.utils.tensorboard import SummaryWriter
 #writer = SummaryWriter()
-from tqdm import tqdm
 
 #print(torch.__version__) # 0.4.0
 #tensorboard 機動com
 #tensorboard --logdir runs/
 
 #-----------------------------------------
-# functions
-#-----------------------------------------
-class DataSet(torch.utils.data.Dataset):
-    def __init__(self, transform=None):
-        self.transform = transform
-        self.data = []
-        self.label = []
-
-        for _ in range(200):
-            
-            input_data = torch.rand([3,100], dtype= torch.float)
-            target     = torch.eye(2)[0]
-            self.data.append(input_data)
-            self.label.append(target)
-
-    def __len__(self):
-        return len(self.data)
-    def __getitem__(self, idx):
-        out_data = self.data[idx]
-        out_label =  self.label[idx]
-        return out_data, out_label
-
-#-----------------------------------------
 # DNN model
 #-----------------------------------------
 class MyModel(nn.Module):
-    def __init__(self):
+    def __init__(self, frame_range, ch=4):
         super(MyModel, self).__init__()
-        input_size = 300
-        hidden1 = 1024*2
-        hidden2 = 1024*1
-        hidden3 = 512
-        hidden4 = 64
-        output_size = 2
+        input_size = frame_range*ch
+        hidden1 = 512
+        hidden2 = 512
+        hidden3 = 256
+        hidden4 = 256
+        output_size = frame_range
+
+        self.frame_range = frame_range
 
         self.nural = nn.Sequential(
             nn.Linear(input_size,hidden1),nn.BatchNorm1d(hidden1), nn.LeakyReLU(0.2, inplace=True),nn.Dropout(p=0.3),
@@ -77,11 +49,11 @@ class MyModel(nn.Module):
         )
 
     def forward(self, x):
-        output_flat = x.view(-1, self.num_flat_features(x))#flatten
-        self.output = self.nural(output_flat)
-        self.output = self.output.view(-1,2)
-        self.output = F.softmax(self.output, dim = -1)
-        return self.output
+        output_flat = x.view(-1, self.num_flat_features(x))  #flatten
+        output = self.nural(output_flat)
+        output = output.view(-1, self.frame_range, 1)
+        output = F.softmax(output, dim=-1)
+        return output
 
     def num_flat_features(self, x):
         size = x.size()[1:]  # all dimensions except the batch dimension
@@ -95,108 +67,130 @@ class MyModel(nn.Module):
 #-----------------------------------------
 if __name__ == "__main__":
     # GPUが利用可能か確認
-    if torch.cuda.is_available():
-        device = 'cuda'
-    else:
-        device = 'cpu'
-    # Load model
-    model = MyModel()
-    model = model.to(device)
-
-    # initial setting
-    learning_rate = 1e-4
-    optimizer = optim.Adam(model.parameters(), lr=learning_rate)
-    criterion = nn.MSELoss()
-    #criterion = nn.CrossEntropyLoss()
+    device = 'cuda' if torch.cuda.is_available() else 'cpu'
 
     loss_log = [] # 学習状況のプロット用
     acc_log = [] # 学習状況のプロット用
     train_loss = []
     train_accu = []
     train_i,val_i = 0,0
-    BATCH_SIZE  = 128 # 1つのミニバッチのデータの数
 
-    train_data_set = DataSet()
-    valid_data_set = DataSet()
+    MAX_EPOCH   = 2000
+    BATCH_SIZE  = 10 # 1つのミニバッチのデータの数
 
-    train_size = (len(train_data_set)//BATCH_SIZE)*BATCH_SIZE
-    train_data_set, dust = torch.utils.data.random_split(train_data_set, [train_size, len(train_data_set)-train_size])
-    valid_size = (len(valid_data_set)//BATCH_SIZE)*BATCH_SIZE
-    valid_data_set, dust = torch.utils.data.random_split(valid_data_set, [valid_size, len(valid_data_set)-valid_size])
+    dataset = MyDataset('dataset/')
 
+    # データセットをTrainとValに分割 
+    samples = len(dataset)
+    train_size = int(samples*0.8)
+    val_size = samples - train_size
+
+    train_dataset, val_dataset = torch.utils.data.random_split(dataset, [train_size, val_size])
 
     train_loader = torch.utils.data.DataLoader(
-        dataset=train_data_set,  # データセットの指定
+        dataset=train_dataset,  # データセットの指定
         batch_size=BATCH_SIZE,  # ミニバッチの指定
         shuffle=True,  # シャッフルするかどうかの指定
         num_workers=0)  # コアの数
-    valid_loader = torch.utils.data.DataLoader(
-        dataset=valid_data_set,
+    val_loader = torch.utils.data.DataLoader(
+        dataset=val_dataset,
         batch_size=BATCH_SIZE,
-        shuffle=True,
+        shuffle=False,
         num_workers=0)
-    print('train_dataset = ', len(train_data_set))
-    print('valid_dataset = ', len(valid_data_set))
+
+    print('train_dataset = ', len(train_dataset))
+    print('val_dataset = ', len(val_dataset))
 
     #training step
     train_loss_list, train_acc_list, val_loss_list, val_acc_list = [], [], [], []
     train_loss, train_acc, val_loss, val_acc,t = 0, 0, 0, 0,0
 
-    for epoc in range(2000):
+    data, _ = dataset[0]
+    siglen = data.shape[0]
+
+    frame_range = 1000
+    shift_size = 200
+
+    # Load model
+    model = MyModel(frame_range, ch=4)
+    model = model.to(device)
+
+    # initial setting
+    learning_rate = 1e-4
+    optimizer = optim.Adam(model.parameters(), lr=learning_rate)
+    criterion = nn.MSELoss()
+    # criterion = nn.CrossEntropyLoss()
+
+    for epoc in range(MAX_EPOCH):
         train_loss, train_acc, val_loss, val_acc = 0, 0, 0, 0
 
         # ======== train_mode ======
         model.train() #学習モード
         for in_data, labels in tqdm(train_loader): # 1ミニバッチずつ計算
-            in_data, labels = Variable(in_data), Variable(labels)#微分可能な型
             in_data = in_data.to(device)
-            labels = labels.to(device)
-            optimizer.zero_grad()
+            labels  = labels.to(device)
 
-            #Prediction
-            pred_y = model(in_data)
+            # 任意の区間（frame_range）に信号をカットしDNNに入力
+            # shift_sizeずつ区間をずらす
+            for idx in range(0, siglen-frame_range, shift_size):
+                optimizer.zero_grad()
 
-            train_loss = criterion(pred_y, labels)
-            train_loss.backward()    #バックプロパゲーション
-            optimizer.step()   # 重み更新
+                # shape: batch_size x frame_range x ch
+                input = in_data[:,idx:idx+frame_range,:]
+                label = labels[:,idx:idx+frame_range,:]
 
-            accu_label = torch.argmax(labels, dim = -1)
-            pred_label = torch.argmax(pred_y, dim = -1)
-            train_accu = torch.sum(pred_label==accu_label) / BATCH_SIZE
+                #Prediction
+                pred_y = model(input)
+
+                train_loss = criterion(pred_y, label)
+                train_loss.backward()    #バックプロパゲーション
+                optimizer.step()   # 重み更新
+
+                # acc_label = torch.argmax(label, dim = -1)
+                # pred_label = torch.argmax(pred_y, dim = -1)
+                # train_acc = torch.sum(pred_label==acc_label) / ((siglen-frame_range) /shift_size)
+
+            train_loss_list.append(train_loss.item())
+            # train_acc_list.append(train_acc)
 
             #writer.add_scalar("Loss/Loss_train", loss,train_i)#log train_loss
             #writer.add_scalar("Accuracy/Accu_train", train_acc,train_i)#log train_accu
             train_i+=1
 
-        train_loss_list.append(train_loss.item())
-        train_acc_list.append(train_accu)
-
-
-        # ======== valid_mode ======
+        # ======== val_mode ======
         model.eval() #学習モード
-        for in_data, labels in tqdm(valid_loader): # 1ミニバッチずつ計算
+        for in_data, labels in tqdm(val_loader): # 1ミニバッチずつ計算
 
-            in_data, labels = Variable(in_data), Variable(labels)#微分可能な型
             in_data = in_data.to(device)
             labels = labels.to(device)
+
             with torch.no_grad():
+                # 任意の区間（frame_range）に信号をカットしDNNに入力
+                # shift_sizeずつ区間をずらす
+                for idx in range(0, siglen-frame_range, shift_size):
 
-                #Prediction
-                pred_y = model(in_data)
+                    # shape: batch_size x frame_range x ch
+                    input = in_data[:,idx:idx+frame_range,:]
+                    label = labels[:,idx:idx+frame_range,:]
 
-                val_loss = criterion(pred_y, labels)
-                accu_label = torch.argmax(labels, dim = -1)
-                pred_label = torch.argmax(pred_y, dim = -1)
-                val_accu = torch.sum(pred_label==accu_label) / BATCH_SIZE
+                    #Prediction
+                    pred_y = model(input)
 
-                #writer.add_scalar("Loss/Loss_val", loss,val_i)#log val_loss
-                #writer.add_scalar("Accuracy/Accu_val", val_acc,val_i)#log val_accu
+                    val_loss = criterion(pred_y, label)
+
+                    acc_label = torch.argmax(label, dim = -1)
+                    pred_label = torch.argmax(pred_y, dim = -1)
+                    val_acc = torch.sum(pred_label==acc_label) / siglen
+
+                    #writer.add_scalar("Loss/Loss_val", loss,val_i)#log val_loss
+                    #writer.add_scalar("Accuracy/Accu_val", val_acc,val_i)#log val_acc
                 val_i+=1
-        #writer.close()
-        val_loss_list.append(val_loss.item())
-        val_acc_list.append(val_accu)
 
-        print("Epoc:{}, val_accu:{}, val_loss:{}".format(epoc, val_accu, val_loss))
+            val_loss_list.append(val_loss.item())
+            val_acc_list.append(val_acc)
+
+        #writer.close()
+        print("Epoc:{}, val_acc:{}, val_loss:{}".format(epoc, val_acc, val_loss))
 
         if val_acc>=0.970:
             break
@@ -205,14 +199,3 @@ if __name__ == "__main__":
 
 #tensorboard 機動コマンド
 #tensorboard --logdir runs/
-
-
-
-
-
-
-
-
-
-
-
