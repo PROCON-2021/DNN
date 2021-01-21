@@ -4,13 +4,9 @@ verify_ssl = true
 name = "pypi"
 
 [packages]
-<<<<<<< HEAD
 numpy = "==1.19.3"
-=======
-numpy = "*"
-scipy = "*"
->>>>>>> dev
 tqdm = "*"
+optuna = "*"
 
 [dev-packages]
 
