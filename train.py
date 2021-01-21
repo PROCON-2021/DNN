@@ -14,6 +14,7 @@ import torch.optim as optim
 import torch.nn.functional as F
 
 from datasetloader import MyDataset
+from common.earlystopping import EarlyStopping
 
 #from torch.utils.tensorboard import SummaryWriter
 #writer = SummaryWriter()
@@ -75,6 +76,7 @@ if __name__ == "__main__":
 
     MAX_EPOCH   = 2000
     BATCH_SIZE  = 10 # 1つのミニバッチのデータの数
+    PATIENCE = 20
 
     dataset = MyDataset('dataset/')
 
@@ -112,6 +114,8 @@ if __name__ == "__main__":
     # Load model
     model = MyModel(frame_range, ch=4)
     model = model.to(device)
+
+    early_stopping = EarlyStopping(PATIENCE, verbose=True, out_dir=None, key='max')
 
     # initial setting
     learning_rate = 1e-4
@@ -186,12 +190,15 @@ if __name__ == "__main__":
 
             val_loss_list.append(val_loss.item())
             val_acc_list.append(val_acc)
+            early_stopping(val_acc, model)
 
         #writer.close()
         print("Epoc:{}, val_acc:{}, val_loss:{}".format(epoc, val_acc, val_loss))
 
-        if val_acc>=0.970:
+        if early_stopping.early_stop:
+            print('Early stopping.')
             break
+
     #with open('./Output/trained_model/model_est_subband.pkl', 'wb') as f:
     #    cloudpickle.dump(model, f)
 
