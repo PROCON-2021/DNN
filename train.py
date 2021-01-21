@@ -80,8 +80,8 @@ class MyDataset(Dataset):
 class MyModel(nn.Module):
     def __init__(self):
         super(MyModel, self).__init__()
-        input_size = 800
-        hidden1 = 1024*2
+        input_size = 600*4
+        hidden1 = 1024*4
         hidden2 = 1024*1
         hidden3 = 512
         hidden4 = 64
@@ -113,7 +113,7 @@ class MyModel(nn.Module):
 if __name__ == "__main__":
     batch_size = 10
     shift_size = 100
-    frame_range = 200
+    frame_range = 600
 
     path = 'dataset/'
 
@@ -144,8 +144,8 @@ if __name__ == "__main__":
     # initial setting
     learning_rate = 1e-4
     optimizer = optim.Adam(model.parameters(), lr=learning_rate)
-    criterion = nn.MSELoss()
-    #criterion = nn.CrossEntropyLoss()
+    #criterion = nn.MSELoss()
+    criterion = nn.CrossEntropyLoss()
     train_i,valid_i = 0,0
 
 
@@ -170,8 +170,8 @@ if __name__ == "__main__":
             for idx in range(0, siglen-frame_range, shift_size):
 
                 # shape: batch_size x frame_range x ch
-                input = inputs[:,idx:idx+frame_range,:].cuda()
-                label = labels[:,idx:idx+frame_range,:].cuda()
+                input = inputs[:,idx:idx+frame_range,:].to(device)
+                label = labels[:,idx:idx+frame_range,:].to(device)
 
                 # ここで推論とback prop.を行う
                 # output = model(input)
@@ -180,7 +180,10 @@ if __name__ == "__main__":
                 #prediction
                 output = model(input)
 
-                loss = criterion(output, label[:,0,:])
+                try:
+                    loss = criterion(output, label[:,0,:].data.max(1)[1])
+                except:
+                    loss = criterion(output, label[:,0,:])
                 loss.backward()    #バックプロパゲーション
                 optimizer.step()   # 重み更新   .
 
@@ -204,8 +207,8 @@ if __name__ == "__main__":
             for idx in range(0, siglen-frame_range, shift_size):
 
                 # shape: batch_size x frame_range x ch
-                input = inputs[:,idx:idx+frame_range,:].cuda()
-                label = labels[:,idx:idx+frame_range,:].cuda()
+                input = inputs[:,idx:idx+frame_range,:].to(device)
+                label = labels[:,idx:idx+frame_range,:].to(device)
 
                 # ここで推論とback prop.を行う
                 # output = model(input)
@@ -215,8 +218,11 @@ if __name__ == "__main__":
                 with torch.no_grad():
                     output = model(input)
 
-                loss = criterion(output, label[:,0,:])
-
+                try:
+                    loss = criterion(output, label[:, 0, :].data.max(1)[1])
+                except:
+                    loss = criterion(output, label[:, 0, :])
+                    
                 pred_label = output.data.max(1)[1] #予測結果を01に変換
                 accu_label = label[:,0,:].data.max(1)[1] #正解を01に変換
                 valid_acc = torch.sum(pred_label==accu_label).cpu().numpy()/batch_size
@@ -228,4 +234,6 @@ if __name__ == "__main__":
 
 
 #tensorboard 機動コマンド
+
+#ssh ユーザ名@サーバーのIPアドレス -L 6006:localhost:6006
 #tensorboard --logdir runs/
