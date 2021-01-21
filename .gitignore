@@ -130,3 +130,5 @@ dmypy.json
 
 # Numpy files
 *.npy
+
+Pipfile.lock
