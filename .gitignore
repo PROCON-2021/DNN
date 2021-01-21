@@ -130,3 +130,9 @@ dmypy.json
 
 # Numpy files
 *.npy
+
+# tensorbord files
+runs/
+
+# keep folder
+!.gitkeep
