@@ -7,8 +7,13 @@ name = "pypi"
 numpy = "==1.19.3"
 tqdm = "*"
 optuna = "*"
+numpy = "*"
+scipy = "*"
+tensorboard = "*"
+cloudpickle = "*"
 
 [dev-packages]
+autopep8 = "*"
 
 [requires]
 python_version = "3.8"
