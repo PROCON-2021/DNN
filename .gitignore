@@ -134,5 +134,8 @@ dmypy.json
 # tensorbord files
 runs/
 
+# trained models
+dataset/models/
+
 # keep folder
 !.gitkeep
