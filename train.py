@@ -1,67 +1,105 @@
-#-----------------------------------------
-# import
-#-----------------------------------------
-import os
 import numpy as np
-import numpy as np
-#import cloudpickle
-import sys
-#import soundfile as sf
-#import pylab as plt
-#import wave
-#import struct
-from scipy import fromstring, int16,signal
-import random
-#import pickle
-#import glob
-import time
+from pathlib import Path
+from torch.utils.data import Dataset, DataLoader
+from tqdm import tqdm
+
 import torch
 import torch.nn as nn
 import torch.optim as optim
 from torch.autograd import Variable
 import torch.nn.functional as F
-import multiprocessing
-multiprocessing.set_start_method('spawn', True)
-import csv
-#from torch.utils.tensorboard import SummaryWriter
-#writer = SummaryWriter()
-from tqdm import tqdm
-
-#print(torch.__version__) # 0.4.0
-#tensorboard 機動com
+import pickle
+from torch.utils.tensorboard import SummaryWriter
+writer = SummaryWriter()
+import cloudpickle
+#tensorboard 機動コマンド
 #tensorboard --logdir runs/
 
-#-----------------------------------------
-# functions
-#-----------------------------------------
-class DataSet(torch.utils.data.Dataset):
-    def __init__(self, transform=None):
-        self.transform = transform
-        self.data = []
-        self.label = []
 
-        for _ in range(200):
-            
-            input_data = torch.rand([3,100], dtype= torch.float)
-            target     = torch.eye(2)[0]
-            self.data.append(input_data)
-            self.label.append(target)
+class MyDataset(Dataset):
+    def __init__(self, path, frame_range=20, key='train'):
+
+        # ! TODO
+        # ! テスト用の処理を実装
+        # ! シリアルで送られてくる信号をバッファして云々
+
+        patience_path = 'dataset/dry_signals/patience'
+        trainee_path = 'dataset/dry_signals/trainee'
+        #dir = Path(path)
+        patience_file_list = list(Path(patience_path).iterdir())
+        trainee_file_list  = list(Path(trainee_path).iterdir())
+
+        # 入力データの範囲
+        self.frame_range = frame_range
+
+        # 配列確保用
+        tmp = np.loadtxt(patience_file_list[0], delimiter=',', dtype=np.float32)
+
+        #クラス分類数（patience, trainee）
+        class_num = 2
+
+        # データとラベルを格納する配列
+        # data : [siglen x ch x n_files]
+        # label: [siglen x label x n_files]
+        self.patience_data  = np.zeros([tmp.shape[0], tmp.shape[1]-2, len(patience_file_list)], dtype = "float32")
+        self.patience_label = np.zeros([tmp.shape[0], class_num     , len(patience_file_list)], dtype = "float32")
+        self.trainee_data   = np.zeros([tmp.shape[0], tmp.shape[1]-2, len(trainee_file_list)],  dtype = "float32")
+        self.trainee_label  = np.zeros([tmp.shape[0], class_num     , len(trainee_file_list)],  dtype = "float32")
+
+        # tqdm設定
+        proc = tqdm(total=len(trainee_file_list), desc='Import dataset and label')
+        for i, file in enumerate(trainee_file_list):
+            #時間軸以外を取得
+            self.trainee_data[:,:,i] = np.loadtxt(file, delimiter=',', dtype=np.float32)[:,1:4]
+            # trainee : 0
+            self.trainee_label[:, :,i] = torch.eye(class_num)[0]
+            proc.update()
+
+        # tqdm設定
+        proc = tqdm(total=len(patience_file_list), desc='Import dataset and label')
+        for i, file in enumerate(patience_file_list):
+            #時間軸以外を取得
+            self.patience_data[:,:,i] = np.loadtxt(file, delimiter=',', dtype=np.float32)[:,1:4]
+
+            # patience: 1
+            self.patience_label[:, :,i] = torch.eye(class_num)[1]
+            proc.update()
+
+
+        #cancatenate
+        self.data = np.concatenate([self.patience_data, self.trainee_data], 2)
+        self.label = np.concatenate([self.patience_label, self.trainee_label], 2)
+
 
     def __len__(self):
-        return len(self.data)
-    def __getitem__(self, idx):
-        out_data = self.data[idx]
-        out_label =  self.label[idx]
-        return out_data, out_label
+        return self.data.shape[2]
 
-#-----------------------------------------
-# DNN model
-#-----------------------------------------
+    def __getitem__(self, idx):
+        # データ全部を渡す
+        # シフトしながらDNNに入力するのは別の所で実装（だと思っている）
+        return self.data[:,:,idx], self.label[:,:,idx]
+
 class MyModel(nn.Module):
     def __init__(self):
+
         super(MyModel, self).__init__()
-        input_size = 300
-        hidden1 = 1024*2
+
+        self.conv_layer1 = nn.Sequential(
+        nn.Conv2d(in_channels =1, out_channels = 4, kernel_size =[3, 3], stride =[2, 1],padding =[0, 1]),
+        nn.LeakyReLU())
+        self.conv_layer2 = nn.Sequential(
+        nn.Conv2d(in_channels =4, out_channels = 16, kernel_size =[3, 3], stride =[2, 1],padding =[0, 1]),
+        nn.LeakyReLU())
+        self.conv_layer3 = nn.Sequential(
+        nn.Conv2d(in_channels =16, out_channels = 16, kernel_size =[3, 3], stride =[2, 1],padding =[0, 1]),
+        nn.LeakyReLU())
+        self.conv_layer4 = nn.Sequential(
+        nn.Conv2d(in_channels =16, out_channels = 4, kernel_size =[3, 3], stride =[2, 1],padding =[0, 1]),
+        nn.LeakyReLU())
+
+
+        input_size = 2688
+        hidden1 = 1024*4
         hidden2 = 1024*1
         hidden3 = 512
         hidden4 = 64
@@ -77,8 +115,13 @@ class MyModel(nn.Module):
         )
 
     def forward(self, x):
-        output_flat = x.view(-1, self.num_flat_features(x))#flatten
-        self.output = self.nural(output_flat)
+        output = self.conv_layer1(x)
+        output = self.conv_layer2(output)
+        output = self.conv_layer3(output)
+        output = self.conv_layer4(output)
+
+        self.output = output.view(-1, self.num_flat_features(output))#flatten
+        self.output = self.nural(self.output)
         self.output = self.output.view(-1,2)
         self.output = F.softmax(self.output, dim = -1)
         return self.output
@@ -90,129 +133,163 @@ class MyModel(nn.Module):
             num_features *= s
         return num_features
 
-#-----------------------------------------
-# main
-#-----------------------------------------
+
 if __name__ == "__main__":
+    batch_size = 16
+    shift_size = 10
+    frame_range = 3600
+
+    path = 'dataset/'
+
+    try:
+        #load
+        with open('dataset/train/dataset.pickle', 'rb') as f:
+            dataset = pickle.load(f)
+    except:
+        #make & save
+        dataset = MyDataset(path)
+        with open('dataset/train/dataset.pickle', 'wb') as f:
+            pickle.dump(dataset,f)
+
+    # 信号長を取得
+    data, _ = dataset[0]
+    siglen = data.shape[0]
+
     # GPUが利用可能か確認
     if torch.cuda.is_available():
         device = 'cuda'
     else:
         device = 'cpu'
-    # Load model
+    # def model
     model = MyModel()
     model = model.to(device)
 
     # initial setting
     learning_rate = 1e-4
     optimizer = optim.Adam(model.parameters(), lr=learning_rate)
+
     criterion = nn.MSELoss()
     #criterion = nn.CrossEntropyLoss()
 
-    loss_log = [] # 学習状況のプロット用
-    acc_log = [] # 学習状況のプロット用
-    train_loss = []
-    train_accu = []
-    train_i,val_i = 0,0
-    BATCH_SIZE  = 128 # 1つのミニバッチのデータの数
-
-    train_data_set = DataSet()
-    valid_data_set = DataSet()
-
-    train_size = (len(train_data_set)//BATCH_SIZE)*BATCH_SIZE
-    train_data_set, dust = torch.utils.data.random_split(train_data_set, [train_size, len(train_data_set)-train_size])
-    valid_size = (len(valid_data_set)//BATCH_SIZE)*BATCH_SIZE
-    valid_data_set, dust = torch.utils.data.random_split(valid_data_set, [valid_size, len(valid_data_set)-valid_size])
+    train_i,valid_i = 0,0
 
 
-    train_loader = torch.utils.data.DataLoader(
-        dataset=train_data_set,  # データセットの指定
-        batch_size=BATCH_SIZE,  # ミニバッチの指定
-        shuffle=True,  # シャッフルするかどうかの指定
-        num_workers=0)  # コアの数
-    valid_loader = torch.utils.data.DataLoader(
-        dataset=valid_data_set,
-        batch_size=BATCH_SIZE,
-        shuffle=True,
-        num_workers=0)
-    print('train_dataset = ', len(train_data_set))
-    print('valid_dataset = ', len(valid_data_set))
+    n_samples = len(dataset) # n_samples is 200 files
+    train_size = int(len(dataset) * 0.9) # train_size is 180 files
+    val_size = n_samples - train_size # val_size is 20 files
 
-    #training step
-    train_loss_list, train_acc_list, val_loss_list, val_acc_list = [], [], [], []
-    train_loss, train_acc, val_loss, val_acc,t = 0, 0, 0, 0,0
+    #dataloader = DataLoader(dataset, batch_size, shuffle=True)
+    train_dataset, val_dataset = torch.utils.data.random_split(dataset, [train_size, val_size])
+    train_dataloader = DataLoader(train_dataset, batch_size, shuffle=True)
+    valid_dataloader = DataLoader(val_dataset,   batch_size, shuffle=True)
 
-    for epoc in range(2000):
-        train_loss, train_acc, val_loss, val_acc = 0, 0, 0, 0
+    for epoc in range(10):
 
-        # ======== train_mode ======
-        model.train() #学習モード
-        for in_data, labels in tqdm(train_loader): # 1ミニバッチずつ計算
-            in_data, labels = Variable(in_data), Variable(labels)#微分可能な型
-            in_data = in_data.to(device)
-            labels = labels.to(device)
-            optimizer.zero_grad()
+        #######################################################
+        #                     Train mode
+        #######################################################
+        for data, label in tqdm(train_dataloader):
+        #for i, data in enumerate(train_dataloader):
 
-            #Prediction
-            pred_y = model(in_data)
+            # shape: batch_size x siglen x ch
+            inputs, labels = data, label
+            # tmp betch size データセットがうまく割り切れなかった時用
+            tmp_batch_size = data.shape[0]
 
-            train_loss = criterion(pred_y, labels)
-            train_loss.backward()    #バックプロパゲーション
-            optimizer.step()   # 重み更新
+            # 任意の区間（frame_range）に信号をカットしDNNに入力
+            # shift_sizeずつ区間をずらす
+            for idx in range(0, siglen-frame_range, shift_size):
 
-            accu_label = torch.argmax(labels, dim = -1)
-            pred_label = torch.argmax(pred_y, dim = -1)
-            train_accu = torch.sum(pred_label==accu_label) / BATCH_SIZE
+                # shape: batch_size x frame_range x ch
+                input = inputs[:,idx:idx+frame_range,:]
+                # conv2d用に次元追加　　shape: batch_size x 1 x frame_range x ch
+                input = input[:,np.newaxis,:,:]
+                #データ数が少ないので適当にノイズ加算
+                noise = np.random.normal(0, 0.01, input.shape).astype('float32')
+                input = (input + noise).to(device)
+                label = labels[:,idx:idx+frame_range,:].to(device)
 
-            #writer.add_scalar("Loss/Loss_train", loss,train_i)#log train_loss
-            #writer.add_scalar("Accuracy/Accu_train", train_acc,train_i)#log train_accu
-            train_i+=1
+                # ここで推論とback prop.を行う
+                # output = model(input)
+                optimizer.zero_grad()
 
-        train_loss_list.append(train_loss.item())
-        train_acc_list.append(train_accu)
+                #prediction
+                output = model(input)
+
+                #Loss計算
+                try:#nn.CrossEntropyLoss()使用時
+                    loss = criterion(output, label[:,0,:].data.max(1)[1])
+                except:# MSE使用時
+                    loss = criterion(output, label[:,0,:])
+
+                loss.backward()    #バックプロパゲーション
+                optimizer.step()   # 重み更新   .
+
+            #正解率計算　正解数/temp_batch_size
+                pred_label = output.data.max(1)[1] #予測結果を01に変換
+                accu_label = label[:,0,:].data.max(1)[1] #正解を01に変換
+                train_acc = torch.sum(pred_label==accu_label).cpu().numpy()/tmp_batch_size
+                #print(train_acc)
+
+                #tensorboard用に [loss, accu]を保存
+                writer.add_scalar("Loss/Loss_train", loss,train_i)#log loss
+                writer.add_scalar("Accuracy/Accu_train", train_acc,train_i)#log loss
+                train_i+=1
+
+        #######################################################
+        #                     Validation mode
+        #######################################################
+        for data, label in tqdm(valid_dataloader):
+
+            # shape: batch_size x siglen x ch
+            inputs, labels = data, label
+            # tmp betch size データセットがうまく割り切れなかった時用
+            tmp_batch_size = data.shape[0]
+
+            # 任意の区間（frame_range）に信号をカットしDNNに入力
+            # shift_sizeずつ区間をずらす
+            for idx in range(0, siglen-frame_range, shift_size):
+
+                # shape: batch_size x frame_range x ch
+                input = inputs[:,idx:idx+frame_range,:]
+                # conv2d用に次元追加　　shape: batch_size x 1 x frame_range x ch
+                input = input[:,np.newaxis,:,:]
+                #データ数が少ないので適当にノイズ加算
+                noise = np.random.normal(0, 0.01, input.shape).astype('float32')
+                input = (input + noise).to(device)
+                label = labels[:,idx:idx+frame_range,:].to(device)
+
+                # ここで推論とback prop.を行う
+                # output = model(input)
+                optimizer.zero_grad()
+
+                #prediction
+                with torch.no_grad():
+                    output = model(input)
+
+                try:
+                    loss = criterion(output, label[:, 0, :].data.max(1)[1])
+                except:
+                    loss = criterion(output, label[:, 0, :])
+
+                pred_label = output.data.max(1)[1] #予測結果を01に変換
+                accu_label = label[:,0,:].data.max(1)[1] #正解を01に変換
+                valid_acc = torch.sum(pred_label==accu_label).cpu().numpy()/tmp_batch_size
+                #print(valid_acc)
+
+                writer.add_scalar("Loss/Loss_valid", loss,valid_i)#log loss
+                writer.add_scalar("Accuracy/Accu_valid", valid_acc,valid_i)#log loss
+                valid_i+=1
 
 
-        # ======== valid_mode ======
-        model.eval() #学習モード
-        for in_data, labels in tqdm(valid_loader): # 1ミニバッチずつ計算
+    #学習済みモデルの保存
+    with open('dataset/models/trained_model.pickle', 'wb') as f:
+        cloudpickle.dump(model, f)
 
-            in_data, labels = Variable(in_data), Variable(labels)#微分可能な型
-            in_data = in_data.to(device)
-            labels = labels.to(device)
-            with torch.no_grad():
 
-                #Prediction
-                pred_y = model(in_data)
 
-                val_loss = criterion(pred_y, labels)
-                accu_label = torch.argmax(labels, dim = -1)
-                pred_label = torch.argmax(pred_y, dim = -1)
-                val_accu = torch.sum(pred_label==accu_label) / BATCH_SIZE
-
-                #writer.add_scalar("Loss/Loss_val", loss,val_i)#log val_loss
-                #writer.add_scalar("Accuracy/Accu_val", val_acc,val_i)#log val_accu
-                val_i+=1
-        #writer.close()
-        val_loss_list.append(val_loss.item())
-        val_acc_list.append(val_accu)
-
-        print("Epoc:{}, val_accu:{}, val_loss:{}".format(epoc, val_accu, val_loss))
-
-        if val_acc>=0.970:
-            break
-    #with open('./Output/trained_model/model_est_subband.pkl', 'wb') as f:
-    #    cloudpickle.dump(model, f)
 
 #tensorboard 機動コマンド
+
+#ssh ユーザ名@サーバーのIPアドレス -L 6006:localhost:6006
 #tensorboard --logdir runs/
-
-
-
-
-
-
-
-
-
-
-
