@@ -131,6 +131,8 @@ dmypy.json
 # Numpy files
 *.npy
 
+Pipfile.lock
+
 # tensorbord files
 runs/
 
@@ -139,3 +141,4 @@ dataset/models/
 
 # keep folder
 !.gitkeep
+

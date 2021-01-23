@@ -4,9 +4,11 @@ verify_ssl = true
 name = "pypi"
 
 [packages]
+numpy = "==1.19.3"
+tqdm = "*"
+optuna = "*"
 numpy = "*"
 scipy = "*"
-tqdm = "*"
 tensorboard = "*"
 cloudpickle = "*"
 

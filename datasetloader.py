@@ -26,8 +26,8 @@ class MyDataset(Dataset):
         # データとラベルを格納する配列
         # data : [siglen x ch x n_files]
         # label: [siglen x label x n_files]
-        self.data = np.zeros([tmp.shape[0], tmp.shape[1], len(file_list)])
-        self.label = np.zeros([tmp.shape[0], 1, len(file_list)])
+        self.data = np.zeros([tmp.shape[0], tmp.shape[1], len(file_list)]).astype(np.float32)
+        self.label = np.zeros([tmp.shape[0], 1, len(file_list)]).astype(np.float32)
 
         # tqdm設定
         proc = tqdm(total=len(file_list), desc='Import dataset and label')

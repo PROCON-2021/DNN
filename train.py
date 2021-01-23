@@ -6,15 +6,16 @@ from tqdm import tqdm
 import torch
 import torch.nn as nn
 import torch.optim as optim
-from torch.autograd import Variable
 import torch.nn.functional as F
+
 import pickle
 from torch.utils.tensorboard import SummaryWriter
 writer = SummaryWriter()
 import cloudpickle
+from common.earlystopping import EarlyStopping
+
 #tensorboard 機動コマンド
 #tensorboard --logdir runs/
-
 
 class MyDataset(Dataset):
     def __init__(self, path, frame_range=20, key='train'):
@@ -124,7 +125,7 @@ class MyModel(nn.Module):
         self.output = self.nural(self.output)
         self.output = self.output.view(-1,2)
         self.output = F.softmax(self.output, dim = -1)
-        return self.output
+        return self.output                                                     
 
     def num_flat_features(self, x):
         size = x.size()[1:]  # all dimensions except the batch dimension
@@ -135,9 +136,13 @@ class MyModel(nn.Module):
 
 
 if __name__ == "__main__":
-    batch_size = 16
+  
     shift_size = 10
     frame_range = 3600
+    
+    MAX_EPOCH   = 2000
+    BATCH_SIZE  = 10 # 1つのミニバッチのデータの数
+    PATIENCE    = 20
 
     path = 'dataset/'
 
@@ -156,13 +161,13 @@ if __name__ == "__main__":
     siglen = data.shape[0]
 
     # GPUが利用可能か確認
-    if torch.cuda.is_available():
-        device = 'cuda'
-    else:
-        device = 'cpu'
+    device = 'cuda' if torch.cuda.is_available() else 'cpu'
+  
     # def model
     model = MyModel()
     model = model.to(device)
+    
+    early_stopping = EarlyStopping(PATIENCE, verbose=True, out_dir='dataset/models/', key='max')
 
     # initial setting
     learning_rate = 1e-4
@@ -173,17 +178,16 @@ if __name__ == "__main__":
 
     train_i,valid_i = 0,0
 
-
     n_samples = len(dataset) # n_samples is 200 files
     train_size = int(len(dataset) * 0.9) # train_size is 180 files
     val_size = n_samples - train_size # val_size is 20 files
 
-    #dataloader = DataLoader(dataset, batch_size, shuffle=True)
+    #dataloader = DataLoader(dataset, BATCH_SIZE, shuffle=True)
     train_dataset, val_dataset = torch.utils.data.random_split(dataset, [train_size, val_size])
-    train_dataloader = DataLoader(train_dataset, batch_size, shuffle=True)
-    valid_dataloader = DataLoader(val_dataset,   batch_size, shuffle=True)
+    train_dataloader = DataLoader(train_dataset, BATCH_SIZE, shuffle=True)
+    valid_dataloader = DataLoader(val_dataset,   BATCH_SIZE, shuffle=True)
 
-    for epoc in range(10):
+    for epoc in range(MAX_EPOCH):
 
         #######################################################
         #                     Train mode
@@ -259,14 +263,12 @@ if __name__ == "__main__":
                 input = (input + noise).to(device)
                 label = labels[:,idx:idx+frame_range,:].to(device)
 
-                # ここで推論とback prop.を行う
-                # output = model(input)
                 optimizer.zero_grad()
 
                 #prediction
                 with torch.no_grad():
                     output = model(input)
-
+               
                 try:
                     loss = criterion(output, label[:, 0, :].data.max(1)[1])
                 except:
@@ -276,18 +278,19 @@ if __name__ == "__main__":
                 accu_label = label[:,0,:].data.max(1)[1] #正解を01に変換
                 valid_acc = torch.sum(pred_label==accu_label).cpu().numpy()/tmp_batch_size
                 #print(valid_acc)
+                early_stopping(val_acc, model)
 
                 writer.add_scalar("Loss/Loss_valid", loss,valid_i)#log loss
                 writer.add_scalar("Accuracy/Accu_valid", valid_acc,valid_i)#log loss
                 valid_i+=1
-
+                
+            if early_stopping.early_stop:
+                print('Early stopping.')
+                break
 
     #学習済みモデルの保存
     with open('dataset/models/trained_model.pickle', 'wb') as f:
         cloudpickle.dump(model, f)
-
-
-
 
 #tensorboard 機動コマンド
 
