@@ -1,7 +1,11 @@
+from os import write
 import numpy as np
-from pathlib import Path
-from torch.utils.data import Dataset, DataLoader
+from torch.utils.data import DataLoader
+from torch.utils.tensorboard.summary import hparams
 from tqdm import tqdm
+import datetime
+import pandas
+import uuid
 
 import torch
 import torch.nn as nn
@@ -10,78 +14,16 @@ import torch.nn.functional as F
 
 import pickle
 from torch.utils.tensorboard import SummaryWriter
-writer = SummaryWriter()
 import cloudpickle
+import optuna
 from common.earlystopping import EarlyStopping
+from datasetloader import MyDataset
 
 #tensorboard 機動コマンド
 #tensorboard --logdir runs/
 
-class MyDataset(Dataset):
-    def __init__(self, path, frame_range=20, key='train'):
-
-        # ! TODO
-        # ! テスト用の処理を実装
-        # ! シリアルで送られてくる信号をバッファして云々
-
-        patience_path = 'dataset/dry_signals/patience'
-        trainee_path = 'dataset/dry_signals/trainee'
-        #dir = Path(path)
-        patience_file_list = list(Path(patience_path).iterdir())
-        trainee_file_list  = list(Path(trainee_path).iterdir())
-
-        # 入力データの範囲
-        self.frame_range = frame_range
-
-        # 配列確保用
-        tmp = np.loadtxt(patience_file_list[0], delimiter=',', dtype=np.float32)
-
-        #クラス分類数（patience, trainee）
-        class_num = 2
-
-        # データとラベルを格納する配列
-        # data : [siglen x ch x n_files]
-        # label: [siglen x label x n_files]
-        self.patience_data  = np.zeros([tmp.shape[0], tmp.shape[1]-2, len(patience_file_list)], dtype = "float32")
-        self.patience_label = np.zeros([tmp.shape[0], class_num     , len(patience_file_list)], dtype = "float32")
-        self.trainee_data   = np.zeros([tmp.shape[0], tmp.shape[1]-2, len(trainee_file_list)],  dtype = "float32")
-        self.trainee_label  = np.zeros([tmp.shape[0], class_num     , len(trainee_file_list)],  dtype = "float32")
-
-        # tqdm設定
-        proc = tqdm(total=len(trainee_file_list), desc='Import dataset and label')
-        for i, file in enumerate(trainee_file_list):
-            #時間軸以外を取得
-            self.trainee_data[:,:,i] = np.loadtxt(file, delimiter=',', dtype=np.float32)[:,1:4]
-            # trainee : 0
-            self.trainee_label[:, :,i] = torch.eye(class_num)[0]
-            proc.update()
-
-        # tqdm設定
-        proc = tqdm(total=len(patience_file_list), desc='Import dataset and label')
-        for i, file in enumerate(patience_file_list):
-            #時間軸以外を取得
-            self.patience_data[:,:,i] = np.loadtxt(file, delimiter=',', dtype=np.float32)[:,1:4]
-
-            # patience: 1
-            self.patience_label[:, :,i] = torch.eye(class_num)[1]
-            proc.update()
-
-
-        #cancatenate
-        self.data = np.concatenate([self.patience_data, self.trainee_data], 2)
-        self.label = np.concatenate([self.patience_label, self.trainee_label], 2)
-
-
-    def __len__(self):
-        return self.data.shape[2]
-
-    def __getitem__(self, idx):
-        # データ全部を渡す
-        # シフトしながらDNNに入力するのは別の所で実装（だと思っている）
-        return self.data[:,:,idx], self.label[:,:,idx]
-
 class MyModel(nn.Module):
-    def __init__(self):
+    def __init__(self, p_ratio=0):
 
         super(MyModel, self).__init__()
 
@@ -107,9 +49,9 @@ class MyModel(nn.Module):
         output_size = 2
 
         self.nural = nn.Sequential(
-            nn.Linear(input_size,hidden1),nn.BatchNorm1d(hidden1), nn.LeakyReLU(0.2, inplace=True),nn.Dropout(p=0.3),
-            nn.Linear(hidden1,hidden2),nn.BatchNorm1d(hidden2),nn.LeakyReLU(0.2, inplace=True),nn.Dropout(p=0.3),
-            nn.Linear(hidden2,hidden2),nn.BatchNorm1d(hidden2),nn.LeakyReLU(0.2, inplace=True),nn.Dropout(p=0.3),
+            nn.Linear(input_size,hidden1),nn.BatchNorm1d(hidden1), nn.LeakyReLU(0.2, inplace=True),nn.Dropout(p=p_ratio),
+            nn.Linear(hidden1,hidden2),nn.BatchNorm1d(hidden2),nn.LeakyReLU(0.2, inplace=True),nn.Dropout(p=p_ratio),
+            nn.Linear(hidden2,hidden2),nn.BatchNorm1d(hidden2),nn.LeakyReLU(0.2, inplace=True),nn.Dropout(p=p_ratio),
             nn.Linear(hidden2,hidden3),nn.BatchNorm1d(hidden3),nn.LeakyReLU(0.2, inplace=True),nn.Dropout(p=0.2),
             nn.Linear(hidden3,hidden4),nn.BatchNorm1d(hidden4),nn.LeakyReLU(0.2, inplace=True),nn.Dropout(p=0.2),
             nn.Linear(hidden4,output_size),nn.BatchNorm1d(output_size),nn.LeakyReLU(0.2, inplace=True)
@@ -134,14 +76,20 @@ class MyModel(nn.Module):
             num_features *= s
         return num_features
 
+def objective(trial):
 
-if __name__ == "__main__":
-  
-    shift_size = 10
+    dir = ['runs', date, str(uuid.uuid4())]
+    writer = SummaryWriter(log_dir=('/').join(dir))
+
+    # ハイパーパラメータ
+    batch_size = trial.suggest_int('batch_size', 16, 32)
+    dropout = trial.suggest_float('dropout', 0.1, 0.4)
+    learning_rate = trial.suggest_float('lr', 1e-5, 1e-2)
+
+    shift_size  = 10
     frame_range = 3600
     
-    MAX_EPOCH   = 2000
-    BATCH_SIZE  = 10 # 1つのミニバッチのデータの数
+    MAX_EPOCH   = 10
     PATIENCE    = 20
 
     path = 'dataset/'
@@ -164,17 +112,17 @@ if __name__ == "__main__":
     device = 'cuda' if torch.cuda.is_available() else 'cpu'
   
     # def model
-    model = MyModel()
+    model = MyModel(p_ratio=dropout)
     model = model.to(device)
     
     early_stopping = EarlyStopping(PATIENCE, verbose=True, out_dir='dataset/models/', key='max')
 
     # initial setting
-    learning_rate = 1e-4
+    # learning_rate = 1e-4
     optimizer = optim.Adam(model.parameters(), lr=learning_rate)
 
-    criterion = nn.MSELoss()
-    #criterion = nn.CrossEntropyLoss()
+    # criterion = nn.MSELoss()
+    criterion = nn.CrossEntropyLoss()
 
     train_i,valid_i = 0,0
 
@@ -184,11 +132,22 @@ if __name__ == "__main__":
 
     #dataloader = DataLoader(dataset, BATCH_SIZE, shuffle=True)
     train_dataset, val_dataset = torch.utils.data.random_split(dataset, [train_size, val_size])
-    train_dataloader = DataLoader(train_dataset, BATCH_SIZE, shuffle=True)
-    valid_dataloader = DataLoader(val_dataset,   BATCH_SIZE, shuffle=True)
+    train_dataloader = DataLoader(train_dataset, batch_size, shuffle=True)
+    valid_dataloader = DataLoader(val_dataset,   batch_size, shuffle=True)
+
+    # OptunaチューニングとEarlystoppingの為に計算
+    valid_acc_sum = 0
+    valid_acc_ave = 0
+
+    hparams = {
+        'batch_size': batch_size,
+        'dropout': dropout,
+        'learning_rate': learning_rate,
+        'shift_size': shift_size,
+        'frame_range': frame_range,
+    }
 
     for epoc in range(MAX_EPOCH):
-
         #######################################################
         #                     Train mode
         #######################################################
@@ -213,8 +172,6 @@ if __name__ == "__main__":
                 input = (input + noise).to(device)
                 label = labels[:,idx:idx+frame_range,:].to(device)
 
-                # ここで推論とback prop.を行う
-                # output = model(input)
                 optimizer.zero_grad()
 
                 #prediction
@@ -229,7 +186,7 @@ if __name__ == "__main__":
                 loss.backward()    #バックプロパゲーション
                 optimizer.step()   # 重み更新   .
 
-            #正解率計算　正解数/temp_batch_size
+                #正解率計算　正解数/temp_batch_size
                 pred_label = output.data.max(1)[1] #予測結果を01に変換
                 accu_label = label[:,0,:].data.max(1)[1] #正解を01に変換
                 train_acc = torch.sum(pred_label==accu_label).cpu().numpy()/tmp_batch_size
@@ -243,6 +200,10 @@ if __name__ == "__main__":
         #######################################################
         #                     Validation mode
         #######################################################
+
+        # 平均のvalid_accを算出するためにイタレーションを数える
+        itr = 0
+
         for data, label in tqdm(valid_dataloader):
 
             # shape: batch_size x siglen x ch
@@ -277,20 +238,55 @@ if __name__ == "__main__":
                 pred_label = output.data.max(1)[1] #予測結果を01に変換
                 accu_label = label[:,0,:].data.max(1)[1] #正解を01に変換
                 valid_acc = torch.sum(pred_label==accu_label).cpu().numpy()/tmp_batch_size
-                #print(valid_acc)
-                early_stopping(val_acc, model)
+                valid_acc_sum += valid_acc
+                # print(valid_acc)
 
                 writer.add_scalar("Loss/Loss_valid", loss,valid_i)#log loss
                 writer.add_scalar("Accuracy/Accu_valid", valid_acc,valid_i)#log loss
                 valid_i+=1
-                
-            if early_stopping.early_stop:
-                print('Early stopping.')
-                break
+                itr += 1
 
-    #学習済みモデルの保存
-    with open('dataset/models/trained_model.pickle', 'wb') as f:
-        cloudpickle.dump(model, f)
+        valid_acc_ave = valid_acc_sum / itr
+        # print(f'Average valid_acc:{valid_acc_ave}')
+
+        early_stopping(valid_acc_ave, model)
+                
+        # Earlystopping
+        if early_stopping.early_stop:
+            print('Early stopping.')
+            break
+    
+        # Optunaの枝刈り
+        if trial.should_prune():
+            raise optuna.exceptions.TrialPruned()
+            
+        valid_acc_sum = valid_acc_ave = 0
+
+    writer.add_hparams(hparams, {"hparam/average_valid_acc": valid_acc_ave})
+    writer.close()
+
+    return valid_acc_ave
+
+    # #学習済みモデルの保存
+    # with open('dataset/models/trained_model.pickle', 'wb') as f:
+    #     cloudpickle.dump(model, f)
+
+if __name__ == "__main__":
+
+    date = datetime.datetime.now().strftime('%Y-%m-%d')
+    
+    # Optuna 枝刈り手法
+    pruner = optuna.pruners.SuccessiveHalvingPruner(
+        min_resource=1,
+        reduction_factor=4,
+        min_early_stopping_rate=0
+    )
+
+    study = optuna.create_study(direction='maximize', pruner=pruner)
+    study.optimize(objective, n_trials=5)
+
+    study_df = study.trials_dataframe()
+    study_df.to_csv(date+'result.csv')
 
 #tensorboard 機動コマンド
 
