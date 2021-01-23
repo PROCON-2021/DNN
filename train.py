@@ -11,6 +11,7 @@ import torch.nn.functional as F
 import pickle
 from torch.utils.tensorboard import SummaryWriter
 writer = SummaryWriter()
+import cloudpickle
 #tensorboard 機動コマンド
 #tensorboard --logdir runs/
 
@@ -22,8 +23,8 @@ class MyDataset(Dataset):
         # ! テスト用の処理を実装
         # ! シリアルで送られてくる信号をバッファして云々
 
-        patience_path = 'dataset/patience'
-        trainee_path = 'dataset/trainee'
+        patience_path = 'dataset/dry_signals/patience'
+        trainee_path = 'dataset/dry_signals/trainee'
         #dir = Path(path)
         patience_file_list = list(Path(patience_path).iterdir())
         trainee_file_list  = list(Path(trainee_path).iterdir())
@@ -40,29 +41,30 @@ class MyDataset(Dataset):
         # データとラベルを格納する配列
         # data : [siglen x ch x n_files]
         # label: [siglen x label x n_files]
-        self.patience_data  = np.zeros([tmp.shape[0], tmp.shape[1]-1, len(patience_file_list)], dtype = "float32")
+        self.patience_data  = np.zeros([tmp.shape[0], tmp.shape[1]-2, len(patience_file_list)], dtype = "float32")
         self.patience_label = np.zeros([tmp.shape[0], class_num     , len(patience_file_list)], dtype = "float32")
-        self.trainee_data   = np.zeros([tmp.shape[0], tmp.shape[1]-1, len(trainee_file_list)],  dtype = "float32")
+        self.trainee_data   = np.zeros([tmp.shape[0], tmp.shape[1]-2, len(trainee_file_list)],  dtype = "float32")
         self.trainee_label  = np.zeros([tmp.shape[0], class_num     , len(trainee_file_list)],  dtype = "float32")
-
-        # tqdm設定
-        proc = tqdm(total=len(patience_file_list), desc='Import dataset and label')
-        for i, file in enumerate(patience_file_list):
-            #時間軸以外を取得
-            self.patience_data[:,:,i] = np.loadtxt(file, delimiter=',', dtype=np.float32)[:,1:]
-
-            # patience: 1
-            self.patience_label[:, :,i] = torch.eye(class_num)[1]
-            proc.update()
 
         # tqdm設定
         proc = tqdm(total=len(trainee_file_list), desc='Import dataset and label')
         for i, file in enumerate(trainee_file_list):
             #時間軸以外を取得
-            self.trainee_data[:,:,i] = np.loadtxt(file, delimiter=',', dtype=np.float32)[:,1:]
+            self.trainee_data[:,:,i] = np.loadtxt(file, delimiter=',', dtype=np.float32)[:,1:4]
             # trainee : 0
             self.trainee_label[:, :,i] = torch.eye(class_num)[0]
             proc.update()
+
+        # tqdm設定
+        proc = tqdm(total=len(patience_file_list), desc='Import dataset and label')
+        for i, file in enumerate(patience_file_list):
+            #時間軸以外を取得
+            self.patience_data[:,:,i] = np.loadtxt(file, delimiter=',', dtype=np.float32)[:,1:4]
+
+            # patience: 1
+            self.patience_label[:, :,i] = torch.eye(class_num)[1]
+            proc.update()
+
 
         #cancatenate
         self.data = np.concatenate([self.patience_data, self.trainee_data], 2)
@@ -79,8 +81,24 @@ class MyDataset(Dataset):
 
 class MyModel(nn.Module):
     def __init__(self):
+
         super(MyModel, self).__init__()
-        input_size = 600*4
+
+        self.conv_layer1 = nn.Sequential(
+        nn.Conv2d(in_channels =1, out_channels = 4, kernel_size =[3, 3], stride =[2, 1],padding =[0, 1]),
+        nn.LeakyReLU())
+        self.conv_layer2 = nn.Sequential(
+        nn.Conv2d(in_channels =4, out_channels = 16, kernel_size =[3, 3], stride =[2, 1],padding =[0, 1]),
+        nn.LeakyReLU())
+        self.conv_layer3 = nn.Sequential(
+        nn.Conv2d(in_channels =16, out_channels = 16, kernel_size =[3, 3], stride =[2, 1],padding =[0, 1]),
+        nn.LeakyReLU())
+        self.conv_layer4 = nn.Sequential(
+        nn.Conv2d(in_channels =16, out_channels = 4, kernel_size =[3, 3], stride =[2, 1],padding =[0, 1]),
+        nn.LeakyReLU())
+
+
+        input_size = 2688
         hidden1 = 1024*4
         hidden2 = 1024*1
         hidden3 = 512
@@ -97,8 +115,13 @@ class MyModel(nn.Module):
         )
 
     def forward(self, x):
-        output_flat = x.view(-1, self.num_flat_features(x))#flatten
-        self.output = self.nural(output_flat)
+        output = self.conv_layer1(x)
+        output = self.conv_layer2(output)
+        output = self.conv_layer3(output)
+        output = self.conv_layer4(output)
+
+        self.output = output.view(-1, self.num_flat_features(output))#flatten
+        self.output = self.nural(self.output)
         self.output = self.output.view(-1,2)
         self.output = F.softmax(self.output, dim = -1)
         return self.output
@@ -110,30 +133,30 @@ class MyModel(nn.Module):
             num_features *= s
         return num_features
 
+
 if __name__ == "__main__":
-    batch_size = 10
-    shift_size = 100
-    frame_range = 600
+    batch_size = 16
+    shift_size = 10
+    frame_range = 3600
 
     path = 'dataset/'
 
-    #dataset = MyDataset(path)
-
     try:
         #load
-        with open('dataset/concat/dataset.pickle', 'rb') as f:
+        with open('dataset/train/dataset.pickle', 'rb') as f:
             dataset = pickle.load(f)
     except:
         #make & save
         dataset = MyDataset(path)
-        with open('dataset/concat/dataset.pickle', 'wb') as f:
+        with open('dataset/train/dataset.pickle', 'wb') as f:
             pickle.dump(dataset,f)
 
     # 信号長を取得
     data, _ = dataset[0]
     siglen = data.shape[0]
 
-    if torch.cuda.is_available(): # GPUが利用可能か確認
+    # GPUが利用可能か確認
+    if torch.cuda.is_available():
         device = 'cuda'
     else:
         device = 'cpu'
@@ -144,8 +167,10 @@ if __name__ == "__main__":
     # initial setting
     learning_rate = 1e-4
     optimizer = optim.Adam(model.parameters(), lr=learning_rate)
-    #criterion = nn.MSELoss()
-    criterion = nn.CrossEntropyLoss()
+
+    criterion = nn.MSELoss()
+    #criterion = nn.CrossEntropyLoss()
+
     train_i,valid_i = 0,0
 
 
@@ -158,19 +183,30 @@ if __name__ == "__main__":
     train_dataloader = DataLoader(train_dataset, batch_size, shuffle=True)
     valid_dataloader = DataLoader(val_dataset,   batch_size, shuffle=True)
 
-    for epoc in range(100):
+    for epoc in range(10):
+
+        #######################################################
+        #                     Train mode
+        #######################################################
         for data, label in tqdm(train_dataloader):
         #for i, data in enumerate(train_dataloader):
 
             # shape: batch_size x siglen x ch
             inputs, labels = data, label
+            # tmp betch size データセットがうまく割り切れなかった時用
+            tmp_batch_size = data.shape[0]
 
             # 任意の区間（frame_range）に信号をカットしDNNに入力
             # shift_sizeずつ区間をずらす
             for idx in range(0, siglen-frame_range, shift_size):
 
                 # shape: batch_size x frame_range x ch
-                input = inputs[:,idx:idx+frame_range,:].to(device)
+                input = inputs[:,idx:idx+frame_range,:]
+                # conv2d用に次元追加　　shape: batch_size x 1 x frame_range x ch
+                input = input[:,np.newaxis,:,:]
+                #データ数が少ないので適当にノイズ加算
+                noise = np.random.normal(0, 0.01, input.shape).astype('float32')
+                input = (input + noise).to(device)
                 label = labels[:,idx:idx+frame_range,:].to(device)
 
                 # ここで推論とback prop.を行う
@@ -180,34 +216,47 @@ if __name__ == "__main__":
                 #prediction
                 output = model(input)
 
-                try:
+                #Loss計算
+                try:#nn.CrossEntropyLoss()使用時
                     loss = criterion(output, label[:,0,:].data.max(1)[1])
-                except:
+                except:# MSE使用時
                     loss = criterion(output, label[:,0,:])
+
                 loss.backward()    #バックプロパゲーション
                 optimizer.step()   # 重み更新   .
 
+            #正解率計算　正解数/temp_batch_size
                 pred_label = output.data.max(1)[1] #予測結果を01に変換
                 accu_label = label[:,0,:].data.max(1)[1] #正解を01に変換
-                train_acc = torch.sum(pred_label==accu_label).cpu().numpy()/batch_size
+                train_acc = torch.sum(pred_label==accu_label).cpu().numpy()/tmp_batch_size
                 #print(train_acc)
 
+                #tensorboard用に [loss, accu]を保存
                 writer.add_scalar("Loss/Loss_train", loss,train_i)#log loss
                 writer.add_scalar("Accuracy/Accu_train", train_acc,train_i)#log loss
                 train_i+=1
 
+        #######################################################
+        #                     Validation mode
+        #######################################################
         for data, label in tqdm(valid_dataloader):
-        #for i, data in enumerate(valid_dataloader):
 
             # shape: batch_size x siglen x ch
             inputs, labels = data, label
+            # tmp betch size データセットがうまく割り切れなかった時用
+            tmp_batch_size = data.shape[0]
 
             # 任意の区間（frame_range）に信号をカットしDNNに入力
             # shift_sizeずつ区間をずらす
             for idx in range(0, siglen-frame_range, shift_size):
 
                 # shape: batch_size x frame_range x ch
-                input = inputs[:,idx:idx+frame_range,:].to(device)
+                input = inputs[:,idx:idx+frame_range,:]
+                # conv2d用に次元追加　　shape: batch_size x 1 x frame_range x ch
+                input = input[:,np.newaxis,:,:]
+                #データ数が少ないので適当にノイズ加算
+                noise = np.random.normal(0, 0.01, input.shape).astype('float32')
+                input = (input + noise).to(device)
                 label = labels[:,idx:idx+frame_range,:].to(device)
 
                 # ここで推論とback prop.を行う
@@ -222,15 +271,22 @@ if __name__ == "__main__":
                     loss = criterion(output, label[:, 0, :].data.max(1)[1])
                 except:
                     loss = criterion(output, label[:, 0, :])
-                    
+
                 pred_label = output.data.max(1)[1] #予測結果を01に変換
                 accu_label = label[:,0,:].data.max(1)[1] #正解を01に変換
-                valid_acc = torch.sum(pred_label==accu_label).cpu().numpy()/batch_size
+                valid_acc = torch.sum(pred_label==accu_label).cpu().numpy()/tmp_batch_size
                 #print(valid_acc)
 
                 writer.add_scalar("Loss/Loss_valid", loss,valid_i)#log loss
                 writer.add_scalar("Accuracy/Accu_valid", valid_acc,valid_i)#log loss
                 valid_i+=1
+
+
+    #学習済みモデルの保存
+    with open('dataset/models/trained_model.pickle', 'wb') as f:
+        cloudpickle.dump(model, f)
+
+
 
 
 #tensorboard 機動コマンド

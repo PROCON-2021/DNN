@@ -8,6 +8,7 @@ numpy = "*"
 scipy = "*"
 tqdm = "*"
 tensorboard = "*"
+cloudpickle = "*"
 
 [dev-packages]
 autopep8 = "*"
