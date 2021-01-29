@@ -1,6 +1,5 @@
 import numpy as np
-from pathlib import Path
-from torch.utils.data import Dataset, DataLoader
+from torch.utils.data import DataLoader
 from tqdm import tqdm
 
 import torch
@@ -15,8 +14,8 @@ import cloudpickle
 from common.earlystopping import EarlyStopping
 from datasetloader import MyDataset
 
-#tensorboard 起動コマンド
-#tensorboard --logdir runs/
+# tensorboard 起動コマンド
+# tensorboard --logdir runs/
 
 class MyModel(nn.Module):
     def __init__(self):
@@ -59,7 +58,8 @@ class MyModel(nn.Module):
         output = self.conv_layer3(output)
         output = self.conv_layer4(output)
 
-        self.output = output.view(-1, self.num_flat_features(output))#flatten
+        # Flatten
+        self.output = output.view(-1, self.num_flat_features(output))
         self.output = self.nural(self.output)
         self.output = self.output.view(-1,2)
         self.output = F.softmax(self.output, dim = -1)
@@ -85,11 +85,11 @@ if __name__ == "__main__":
     path = 'dataset/'
 
     try:
-        #load
+        # load
         with open('dataset/train/dataset.pickle', 'rb') as f:
             dataset = pickle.load(f)
     except:
-        #make & save
+        # make & save
         dataset = MyDataset(path)
         with open('dataset/train/dataset.pickle', 'wb') as f:
             pickle.dump(dataset,f)
@@ -112,7 +112,7 @@ if __name__ == "__main__":
     optimizer = optim.Adam(model.parameters(), lr=learning_rate)
 
     criterion = nn.MSELoss()
-    #criterion = nn.CrossEntropyLoss()
+    # criterion = nn.CrossEntropyLoss()
 
     train_i,valid_i = 0,0
 
@@ -120,7 +120,6 @@ if __name__ == "__main__":
     train_size = int(len(dataset) * 0.9) # train_size is 180 files
     val_size = n_samples - train_size # val_size is 20 files
 
-    #dataloader = DataLoader(dataset, BATCH_SIZE, shuffle=True)
     train_dataset, val_dataset = torch.utils.data.random_split(dataset, [train_size, val_size])
     train_dataloader = DataLoader(train_dataset, BATCH_SIZE, shuffle=True)
     valid_dataloader = DataLoader(val_dataset,   BATCH_SIZE, shuffle=True)
@@ -131,7 +130,6 @@ if __name__ == "__main__":
         #                     Train mode
         #######################################################
         for data, label in tqdm(train_dataloader):
-        #for i, data in enumerate(train_dataloader):
 
             # shape: batch_size x siglen x ch
             inputs, labels = data, label
@@ -144,38 +142,40 @@ if __name__ == "__main__":
 
                 # shape: batch_size x frame_range x ch
                 input = inputs[:,idx:idx+frame_range,:]
-                # conv2d用に次元追加　　shape: batch_size x 1 x frame_range x ch
+                # conv2d用に次元追加
+                # shape: batch_size x 1 x frame_range x ch
                 input = input[:,np.newaxis,:,:]
-                #データ数が少ないので適当にノイズ加算
+                # データ数が少ないので適当にノイズ加算
                 noise = np.random.normal(0, 0.01, input.shape).astype('float32')
                 input = (input + noise).to(device)
                 label = labels[:,idx:idx+frame_range,:].to(device)
 
-                # ここで推論とback prop.を行う
-                # output = model(input)
                 optimizer.zero_grad()
 
-                #prediction
+                # prediction
                 output = model(input)
 
-                #Loss計算
-                try:#nn.CrossEntropyLoss()使用時
+                # Loss計算
+                try:
+                    # CrossEntropyLoss使用時
                     loss = criterion(output, label[:,0,:].data.max(1)[1])
-                except:# MSE使用時
+                except:
+                    # MSE使用時
                     loss = criterion(output, label[:,0,:])
 
-                loss.backward()    #バックプロパゲーション
-                optimizer.step()   # 重み更新   .
+                loss.backward()    # バックプロパゲーション
+                optimizer.step()   # 重み更新
 
-            #正解率計算　正解数/temp_batch_size
-                pred_label = output.data.max(1)[1] #予測結果を01に変換
-                accu_label = label[:,0,:].data.max(1)[1] #正解を01に変換
+                # 正解率計算　正解数/temp_batch_size
+                # 0/1 に変換
+                pred_label = output.data.max(1)[1] 
+                accu_label = label[:,0,:].data.max(1)[1] 
                 train_acc = torch.sum(pred_label==accu_label).cpu().numpy()/tmp_batch_size
-                #print(train_acc)
+                # print(train_acc)
 
-                #tensorboard用に [loss, accu]を保存
-                writer.add_scalar("Loss/Loss_train", loss,train_i)#log loss
-                writer.add_scalar("Accuracy/Accu_train", train_acc,train_i)#log loss
+                # tensorboard用に[loss, accu]を保存
+                writer.add_scalar("Loss/Loss_train", loss,train_i)
+                writer.add_scalar("Accuracy/Accu_train", train_acc,train_i)
                 train_i+=1
 
         #######################################################
@@ -194,16 +194,17 @@ if __name__ == "__main__":
 
                 # shape: batch_size x frame_range x ch
                 input = inputs[:,idx:idx+frame_range,:]
-                # conv2d用に次元追加　　shape: batch_size x 1 x frame_range x ch
+                # conv2d用に次元追加
+                # shape: batch_size x 1 x frame_range x ch
                 input = input[:,np.newaxis,:,:]
-                #データ数が少ないので適当にノイズ加算
+                # データ数が少ないので適当にノイズ加算
                 noise = np.random.normal(0, 0.01, input.shape).astype('float32')
                 input = (input + noise).to(device)
                 label = labels[:,idx:idx+frame_range,:].to(device)
 
                 optimizer.zero_grad()
 
-                #prediction
+                # prediction
                 with torch.no_grad():
                     output = model(input)
                
@@ -212,13 +213,14 @@ if __name__ == "__main__":
                 except:
                     loss = criterion(output, label[:, 0, :])
 
-                pred_label = output.data.max(1)[1] #予測結果を01に変換
-                accu_label = label[:,0,:].data.max(1)[1] #正解を01に変換
+                # 0/1 に変換
+                pred_label = output.data.max(1)[1]
+                accu_label = label[:,0,:].data.max(1)[1]
                 valid_acc = torch.sum(pred_label==accu_label).cpu().numpy()/tmp_batch_size
-                #print(valid_acc)
+                # print(valid_acc)
 
-                writer.add_scalar("Loss/Loss_valid", loss,valid_i)#log loss
-                writer.add_scalar("Accuracy/Accu_valid", valid_acc,valid_i)#log loss
+                writer.add_scalar("Loss/Loss_valid", loss,valid_i) 
+                writer.add_scalar("Accuracy/Accu_valid", valid_acc,valid_i)
                 valid_i+=1
                 early_stopping(valid_acc, model)
                 
@@ -226,10 +228,10 @@ if __name__ == "__main__":
                 print('Early stopping.')
                 break
 
-    #学習済みモデルの保存
+    # 学習済みモデルの保存
     with open('dataset/models/trained_model.pickle', 'wb') as f:
         cloudpickle.dump(model, f)
 
-#tensorboard 起動コマンド
-#ssh ユーザ名@サーバーのIPアドレス -L 6006:localhost:6006
-#tensorboard --logdir runs/
+# tensorboard 起動コマンド
+# ssh ユーザ名@サーバーのIPアドレス -L 6006:localhost:6006
+# tensorboard --logdir runs/
