@@ -29,7 +29,7 @@ class MyDataset(Dataset):
         proc = tqdm(total=len(file_list), desc='Import dataset and label')
 
         for i, file in enumerate(file_list):
-            self.data[:,:,i] = np.loadtxt(file, delimiter=',', dtype=np.float32)
+            self.data[:,:,i] = np.loadtxt(file, delimiter=',', dtype='float32')
 
             # patience: 1
             # trainee : 0
