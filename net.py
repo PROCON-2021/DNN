@@ -5,24 +5,28 @@ class MyModel(nn.Module):
     def __init__(self, out_dim):
         super().__init__()
 
-        input_size  = 2604
-        hidden1     = 1024*4
-        hidden2     = 1024*1
-        hidden3     = 512
+        input_size  = 528
+        hidden1     = 256
+        hidden2     = 256
+        hidden3     = 128
         hidden4     = 64
 
         self.conv = nn.Sequential(
-            nn.Conv2d(in_channels=1, out_channels=4, kernel_size=[3, 3], stride=[2, 1], padding=[0, 1]),
+            nn.Conv2d(in_channels=1, out_channels=4, kernel_size=[3, 3], stride=[1, 1], padding=[0, 1]),
             nn.LeakyReLU(),
+            nn.MaxPool2d(kernel_size=[4, 1], padding=0),
 
-            nn.Conv2d(in_channels=4, out_channels=16, kernel_size=[3, 3], stride=[2, 1], padding=[0, 1]),
+            nn.Conv2d(in_channels=4, out_channels=16, kernel_size=[3, 3], stride=[1, 1], padding=[0, 1]),
             nn.LeakyReLU(),
+            nn.MaxPool2d(kernel_size=[4, 1], padding=0),
 
-            nn.Conv2d(in_channels=16, out_channels=16, kernel_size=[3, 3], stride=[2, 1], padding=[0, 1]),
+            nn.Conv2d(in_channels=16, out_channels=16, kernel_size=[3, 3], stride=[1, 1], padding=[0, 1]),
             nn.LeakyReLU(),
+            nn.MaxPool2d(kernel_size=[4, 1], padding=0),
 
-            nn.Conv2d(in_channels=16, out_channels=4, kernel_size=[3, 3], stride=[2, 1], padding=[0, 1]),
+            nn.Conv2d(in_channels=16, out_channels=16, kernel_size=[3, 3], stride=[1, 1], padding=[0, 1]),
             nn.LeakyReLU(),
+            nn.MaxPool2d(kernel_size=[4, 1], padding=0),
         )
 
         self.dense = nn.Sequential(
