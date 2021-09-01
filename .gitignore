@@ -142,3 +142,4 @@ dataset/models/
 # keep folder
 !.gitkeep
 
+settings.json
