@@ -1,199 +1,125 @@
+import os
 import numpy as np
-from tqdm import tqdm
-import pickle
-import cloudpickle
+import wandb
+from pathlib import Path
 
 # PyTorch
-import torch
+import torch as t
 import torch.nn as nn
 import torch.optim as optim
-from torch.utils.data import DataLoader
-from torch.utils.tensorboard import SummaryWriter
+from torch.utils.data import DataLoader, random_split
 
 # 自作モジュール
 from common.earlystopping import EarlyStopping
-from datasetloader import MyDataset
 from net import MyModel
+from datasetloader import ThighsTrainValDataset
+from common.functions import check_loss
 
-writer = SummaryWriter()
+os.environ["WANDB_SILENT"] = "true"
+PROJECT_NAME = 'Thighs'
 
-# tensorboard 起動コマンド
-# tensorboard --logdir runs/
-# ssh ユーザ名@サーバーのIPアドレス -L 6006:localhost:6006
+def train_step(epoch, dataloader, model, optimizer):
 
-def train_step(epoch, dataloader, model, optimizer, train_i):
+    running_loss = 0.0
+    check_interval = 10
 
     model.train()
-    for inputs, labels in tqdm(dataloader, desc=f'Training step[{epoch+1}/{MAX_EPOCH}]: ', leave=False):
+    for i, data in enumerate(dataloader):
 
-        # tmp betch size データセットがうまく割り切れなかった時用
-        tmp_batch_size = inputs.shape[0]
+        inputs, labels = [i.to(device) for i in data]
 
-        # 任意の区間（frame_range）に信号をカットしDNNに入力
-        # shift_sizeずつ区間をずらす
-        for idx in range(0, siglen-frame_range, shift_size):
+        optimizer.zero_grad()
 
-            # shape: batch_size x frame_range x ch
-            input = inputs[:,idx:idx+frame_range,:]
-            # conv2d用に次元追加
-            # shape: batch_size x 1 x frame_range x ch
-            input = input[:,np.newaxis,:,:]
-            # データ数が少ないので適当にノイズ加算
-            noise = np.random.normal(0, 0.01, input.shape).astype('float32')
-            input = (input + noise).to(device)
-            label = labels[:,idx:idx+frame_range,:].to(device)
+        # prediction
+        output = model(inputs)
 
-            optimizer.zero_grad()
+        # CrossEntropyLoss
+        loss = criterion(output, labels)
 
-            # prediction
-            output = model(input)
+        loss.backward()    # バックプロパゲーション
+        optimizer.step()   # 重み更新
 
-            # Loss計算
-            try:
-                # CrossEntropyLoss使用時
-                loss = criterion(output, label[:,0,:].data.max(1)[1])
-            except:
-                # MSE使用時
-                loss = criterion(output, label[:,0,:])
+        running_loss += loss.item()
 
-            loss.backward()    # バックプロパゲーション
-            optimizer.step()   # 重み更新
+        # pred_label = output.data.max(1)[1] 
+        # accu_label = labels[:,0,:].data.max(1)[1] 
+        # train_acc = torch.sum(pred_label==accu_label).cpu().numpy()/tmp_batch_size
 
-            # 正解率計算　正解数/temp_batch_size
-            # 0/1 に変換
-            pred_label = output.data.max(1)[1] 
-            accu_label = label[:,0,:].data.max(1)[1] 
-            train_acc = torch.sum(pred_label==accu_label).cpu().numpy()/tmp_batch_size
+        if (i+1) % check_interval == 0:
+            check_loss(epoch, i, check_interval, running_loss)
+            wandb.log({'Training loss': running_loss})
+            running_loss = 0.0
 
-            # tensorboard用に[loss, accu]を保存
-            writer.add_scalar("Loss/Loss_train", loss,train_i)
-            writer.add_scalar("Accuracy/Accu_train", train_acc,train_i)
-            train_i+=1
+def valid_step(epoch, dataloader, model):
 
-def valid_step(epoch, dataloader, model, valid_i):
+    valid_loss_sum = 0
 
-    valid_acc_sum, valid_acc_avg = 0, 0
-    valid_loss_sum, valid_loss_avg = 0, 0
-
-    itr = 0
+    correct = 0
+    total = 0
 
     model.eval()
-    for inputs, labels in tqdm(dataloader, desc=f'Validation step[{epoch+1}/{MAX_EPOCH}]: ', leave=False):
-        # tmp betch size データセットがうまく割り切れなかった時用
-        tmp_batch_size = inputs.shape[0]
+    with t.no_grad():
+        for i, data in enumerate(dataloader):
 
-        # 任意の区間（frame_range）に信号をカットしDNNに入力
-        # shift_sizeずつ区間をずらす
-        for idx in range(0, siglen-frame_range, shift_size):
-            # shape: batch_size x frame_range x ch
-            input = inputs[:,idx:idx+frame_range,:]
+            inputs, labels = [i.to(device) for i in data]
+    
+            output = model(inputs)
 
-            # conv2d用に次元追加
-            # shape: batch_size x 1 x frame_range x ch
-            input = input[:,np.newaxis,:,:]
+            loss = criterion(output, labels)
 
-            # データ数が少ないので適当にノイズ加算
-            noise = np.random.normal(0, 0.01, input.shape).astype('float32')
-            input = (input + noise).to(device)
-            label = labels[:,idx:idx+frame_range,:].to(device)
-
-            with torch.no_grad():
-                output = model(input)
-
-            try:
-                loss = criterion(output, label[:, 0, :].data.max(1)[1])
-            except:
-                loss = criterion(output, label[:, 0, :])
-            
             valid_loss_sum += loss.item()
 
-            # 0/1 に変換
-            pred_label = output.data.max(1)[1]
-            accu_label = label[:,0,:].data.max(1)[1]
-            valid_acc  = torch.sum(pred_label==accu_label).cpu().numpy() / tmp_batch_size
-            valid_acc_sum += valid_acc
-            itr += 1
-            # print(valid_acc)
+            _, predicted = t.max(output.data, 1)
+            total += labels.size(0)
+            correct += (predicted == labels).sum().item()
 
-            writer.add_scalar("Loss/Loss_valid", loss,valid_i) 
-            writer.add_scalar("Accuracy/Accu_valid", valid_acc,valid_i)
-            valid_i+=1
-
-    valid_acc_avg = valid_acc_sum / itr
-    valid_loss_avg = valid_loss_sum / itr
-
-    # (1-Acc)とLossの和をスコアとしてEarlystoppingの指標とする
-    # (結局Lossだけをみてあげれば良い気もする)
-    return (1-valid_acc_avg) + valid_loss_avg
+    acc = (correct / total)
+    return acc
 
 if __name__ == "__main__":
 
-    shift_size  = 10
-    frame_range = 3600
-    
     MAX_EPOCH   = 2000
     BATCH_SIZE  = 10 # 1つのミニバッチのデータの数
     PATIENCE    = 20
 
-    path = 'dataset/'
+    classes = 6
 
-    try:
-        # load
-        with open('dataset/train/dataset.pickle', 'rb') as f:
-            dataset = pickle.load(f)
-    except:
-        # make & save
-        dataset = MyDataset(path)
-        with open('dataset/train/dataset.pickle', 'wb') as f:
-            pickle.dump(dataset,f)
+    wandb.init(project=PROJECT_NAME)
 
-    # 信号長を取得
-    data, _ = dataset[0]
-    siglen  = data.shape[0]
+    out_dir = wandb.run.dir
+    path = Path(out_dir)
+    out_dir = '/'.join(path.parts[0:-1])
 
     # GPUが利用可能か確認
-    device = 'cuda' if torch.cuda.is_available() else 'cpu'
+    device = 'cuda' if t.cuda.is_available() else 'cpu'
 
-    # def model
-    model = MyModel().to(device)
-    
-    early_stopping = EarlyStopping(PATIENCE, verbose=True, out_dir='dataset/models/', key='min')
+    model = MyModel(out_dim=6).to(device)  # Model
+    early_stopping = EarlyStopping(PATIENCE, verbose=True, out_dir=out_dir, key='max')
 
-    # initial setting
     learning_rate = 1e-4
     optimizer = optim.Adam(model.parameters(), lr=learning_rate)
 
-    # criterion = nn.MSELoss()
     criterion = nn.CrossEntropyLoss()
 
-    train_i, valid_i = 0, 0
-
     # Dataset =====================================================
-    n_samples = len(dataset) # n_samples is 200 files
-    train_size = int(len(dataset) * 0.9) # train_size is 180 files
-    val_size = n_samples - train_size # val_size is 20 files
+    train_dataset = ThighsTrainValDataset('./dataset/thighs/train')
+    val_dataset = ThighsTrainValDataset('./dataset/thighs/val')
 
-    train_dataset, val_dataset = torch.utils.data.random_split(dataset, [train_size, val_size])
-    train_dataloader = DataLoader(train_dataset, BATCH_SIZE, shuffle=True)
-    valid_dataloader = DataLoader(val_dataset,   BATCH_SIZE, shuffle=True)
-    # 高速化
-    # train_dataloader = DataLoader(train_dataset, BATCH_SIZE, shuffle=True, num_workers=2, pin_memory=True)
-    # valid_dataloader = DataLoader(val_dataset,   BATCH_SIZE, shuffle=True, num_workers=2, pin_memory=True)
+    train_loader = DataLoader(train_dataset, BATCH_SIZE, shuffle=True)
+    valid_loader = DataLoader(val_dataset, BATCH_SIZE, shuffle=False)
 
-    # =============================================================
+    # train_loader = DataLoader(train_dataset, BATCH_SIZE, shuffle=True, num_workers=2, pin_memory=True)
+    # valid_loader = DataLoader(val_dataset,   BATCH_SIZE, shuffle=False, num_workers=2, pin_memory=True)
 
     # DNN Training ================================================
     for epoch in range(MAX_EPOCH):
-        train_step(epoch, train_dataloader, model, optimizer, train_i)
-        valid_score = valid_step(epoch, valid_dataloader, model,valid_i)
+        train_step(epoch, train_loader, model, optimizer)
+        acc = valid_step(epoch, valid_loader, model)
 
-        early_stopping(valid_score, model)
+        wandb.log({'Validation accuracy': acc, 'Epoch': epoch+1})
+        early_stopping(acc, model)
 
         if early_stopping.early_stop:
             print('Early stopping.')
             break
     # =============================================================
-
-    # 学習済みモデルの保存
-    with open('dataset/models/trained_model.pickle', 'wb') as f:
-        cloudpickle.dump(model, f)
