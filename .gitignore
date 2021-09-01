@@ -133,8 +133,7 @@ dmypy.json
 
 Pipfile.lock
 
-# tensorbord files
-runs/
+wandb/
 
 # trained models
 dataset/models/
@@ -143,3 +142,5 @@ dataset/models/
 !.gitkeep
 
 settings.json
+
+*.csv
