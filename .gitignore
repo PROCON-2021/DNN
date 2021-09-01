@@ -136,7 +136,7 @@ Pipfile.lock
 wandb/
 
 # trained models
-dataset/models/
+dataset/
 
 # keep folder
 !.gitkeep
