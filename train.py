@@ -12,11 +12,10 @@ from torch.utils.data import DataLoader, random_split
 # 自作モジュール
 from common.earlystopping import EarlyStopping
 from net import MyModel
-from datasetloader import ThighsTrainValDataset
+from datasetloader import TrainValDataset
 from common.functions import check_loss
 
 os.environ["WANDB_SILENT"] = "true"
-PROJECT_NAME = 'Thighs'
 
 def train_step(epoch, dataloader, model, optimizer):
 
@@ -36,8 +35,8 @@ def train_step(epoch, dataloader, model, optimizer):
         # CrossEntropyLoss
         loss = criterion(output, labels)
 
-        loss.backward()    # バックプロパゲーション
-        optimizer.step()   # 重み更新
+        loss.backward()
+        optimizer.step()
 
         running_loss += loss.item()
 
@@ -46,11 +45,19 @@ def train_step(epoch, dataloader, model, optimizer):
         # train_acc = torch.sum(pred_label==accu_label).cpu().numpy()/tmp_batch_size
 
         if (i+1) % check_interval == 0:
+            # lossのデバッグ
             check_loss(epoch, i, check_interval, running_loss)
             wandb.log({'Training loss': running_loss})
             running_loss = 0.0
 
-def valid_step(epoch, dataloader, model):
+            # accのデバッグ
+            correct = 0
+            _, predicted = t.max(output.data, 1)
+            total = labels.size(0)
+            correct += (predicted == labels).sum().item()
+            wandb.log({'Training accuracy': correct / total})
+
+def valid_step(dataloader, model):
 
     valid_loss_sum = 0
 
@@ -74,17 +81,21 @@ def valid_step(epoch, dataloader, model):
             correct += (predicted == labels).sum().item()
 
     acc = (correct / total)
+    loss_avg = valid_loss_sum / (i+1)
+    wandb.log({'Validation loss': loss_avg})
+
     return acc
 
 if __name__ == "__main__":
 
+    type_ = 'abs'
+    boost = True
+
     MAX_EPOCH   = 2000
-    BATCH_SIZE  = 10 # 1つのミニバッチのデータの数
+    BATCH_SIZE  = 10
     PATIENCE    = 20
 
-    classes = 6
-
-    wandb.init(project=PROJECT_NAME)
+    wandb.init(project=type_)
 
     out_dir = wandb.run.dir
     path = Path(out_dir)
@@ -93,28 +104,29 @@ if __name__ == "__main__":
     # GPUが利用可能か確認
     device = 'cuda' if t.cuda.is_available() else 'cpu'
 
-    model = MyModel(out_dim=6).to(device)  # Model
+    # Dataset =====================================================
+    train_dataset = TrainValDataset(f'./dataset/{type_}/train', type_)
+    val_dataset = TrainValDataset(f'./dataset/{type_}/val', type_)
+
+    if boost == True:
+        train_loader = DataLoader(train_dataset, BATCH_SIZE, shuffle=True, num_workers=4)
+        valid_loader = DataLoader(val_dataset, BATCH_SIZE, shuffle=False, num_workers=4)
+    else:
+        train_loader = DataLoader(train_dataset, BATCH_SIZE, shuffle=True)
+        valid_loader = DataLoader(val_dataset, BATCH_SIZE, shuffle=False)
+
+    out_dim = len(train_dataset.label)
+    model = MyModel(out_dim=out_dim).to(device)
     early_stopping = EarlyStopping(PATIENCE, verbose=True, out_dir=out_dir, key='max')
 
     learning_rate = 1e-4
     optimizer = optim.Adam(model.parameters(), lr=learning_rate)
-
     criterion = nn.CrossEntropyLoss()
-
-    # Dataset =====================================================
-    train_dataset = ThighsTrainValDataset('./dataset/thighs/train')
-    val_dataset = ThighsTrainValDataset('./dataset/thighs/val')
-
-    train_loader = DataLoader(train_dataset, BATCH_SIZE, shuffle=True)
-    valid_loader = DataLoader(val_dataset, BATCH_SIZE, shuffle=False)
-
-    # train_loader = DataLoader(train_dataset, BATCH_SIZE, shuffle=True, num_workers=2, pin_memory=True)
-    # valid_loader = DataLoader(val_dataset,   BATCH_SIZE, shuffle=False, num_workers=2, pin_memory=True)
 
     # DNN Training ================================================
     for epoch in range(MAX_EPOCH):
         train_step(epoch, train_loader, model, optimizer)
-        acc = valid_step(epoch, valid_loader, model)
+        acc = valid_step(valid_loader, model)
 
         wandb.log({'Validation accuracy': acc, 'Epoch': epoch+1})
         early_stopping(acc, model)
