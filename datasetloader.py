@@ -5,10 +5,11 @@ from torch.utils.data import Dataset
 
 class TrainValDataset(Dataset):
 
-    def __init__(self, path_name, type_):
+    def __init__(self, path_name, type_, norm=True):
 
         self.path = Path(path_name)
         self.csv_path_list = []
+        self.norm = norm
 
         for dir_name in self.path.glob('*/*.csv'):
             self.csv_path_list.append(str(dir_name))
@@ -44,11 +45,15 @@ class TrainValDataset(Dataset):
     def __getitem__(self, idx):
 
         sig = np.loadtxt(self.csv_path_list[idx], delimiter=',', dtype='float32')
-        sig_norm = sig / 1023
+
+        if self.norm is True:
+            sig_ = sig / 1023
+        else:
+            sig_ = sig
 
         d, _ = os.path.split(self.csv_path_list[idx])
         _, classes = os.path.split(d)
 
         label = self.label.index(classes)
 
-        return sig_norm[np.newaxis,:,:], label
+        return sig_[np.newaxis,:,:], label
