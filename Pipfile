@@ -11,6 +11,8 @@ scipy = "*"
 tensorboard = "*"
 cloudpickle = "*"
 wandb = "*"
+torchsummary = "*"
+torch-optimizer = "*"
 
 [dev-packages]
 
