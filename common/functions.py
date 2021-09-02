@@ -1,6 +1,7 @@
 # 実験に用いる関数諸々
 from torch.utils.data import DataLoader, random_split
 import torch as t
+import torch_optimizer as t_opt
 
 # モデルのネットワーク構造をtxt形式で出力
 def export_network(model, out_dir) -> None:
@@ -42,16 +43,13 @@ def check_loss(epoch, itr, interval, running_loss, logger=None):
         if logger != None:
             logger.log({'Training loss': running_loss/interval})
 
-# def get_optimzer(optimizer_name, model, lr):
+def get_optimzer(optimizer_name, model, lr):
 
-#     if optimizer_name == 'Adam':
-#         optimizer = t.optim.Adam(model.parameters(), lr)
-#     elif optimizer_name == 'RAdam':
-#         optimizer = t_opt.RAdam(model.parameters(), lr)
-#     elif optimizer_name == 'SGD':
-#         optimizer = t.optim.SGD(model.parameters(), lr)
-#     else:
-#         print(f'{optimizer_name} is not supported.')
-#         sys.exit(0)
+    if optimizer_name == 'Adam':
+        optimizer = t.optim.Adam(model.parameters(), lr)
+    elif optimizer_name == 'RAdam':
+        optimizer = t_opt.RAdam(model.parameters(), lr)
+    elif optimizer_name == 'SGD':
+        optimizer = t.optim.SGD(model.parameters(), lr)
 
-#     return optimizer
+    return optimizer
