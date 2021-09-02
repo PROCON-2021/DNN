@@ -3,6 +3,19 @@
     // 既存の属性の説明をホバーして表示します。
     // 詳細情報は次を確認してください: https://go.microsoft.com/fwlink/?linkid=830387
     "version": "0.2.0",
+    "inputs": [
+        {
+            "type": "pickString",
+            "id": "type",
+            "description": "params",
+            "options": [
+                "abs",
+                "thighs",
+                "shoulders"
+            ],
+            "default": "abs"
+        }
+    ],
     "configurations": [
         {
             "name": "Python: Current File",
@@ -11,7 +24,10 @@
             "program": "${file}",
             "console": "integratedTerminal",
             "cwd": "${fileDirname}",
-            "internalConsoleOptions": "openOnFirstSessionStart"
+            "internalConsoleOptions": "openOnFirstSessionStart",
+            "args": [
+                "${input:type}"
+            ]
         }
     ]
 }
