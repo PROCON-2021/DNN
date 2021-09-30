@@ -2,6 +2,7 @@ import os
 import numpy as np
 from pathlib import Path
 from torch.utils.data import Dataset
+from common.functions import sig2spec
 
 class TrainValDataset(Dataset):
 
@@ -46,14 +47,25 @@ class TrainValDataset(Dataset):
 
         sig = np.loadtxt(self.csv_path_list[idx], delimiter=',', dtype='float32')
 
+        sig_ = (sig - 512) / 1023
+
         if self.norm is True:
             sig_ = sig / 1023
         else:
             sig_ = sig
+
+        spec_list = []
+
+        for i in range(sig.shape[1]):
+            spec = sig2spec(sig_[:, i], 128, 64)
+            spec_list.append(spec)
+
+        spec_ = np.array(spec_list)
+        spec_ = np.abs(spec_).astype('float32')
 
         d, _ = os.path.split(self.csv_path_list[idx])
         _, classes = os.path.split(d)
 
         label = self.label.index(classes)
 
-        return sig_[np.newaxis,:,:], label
+        return spec_, label
