@@ -1,4 +1,7 @@
-# 実験に用いる関数諸々
+import os, sys
+import numpy as np
+from scipy.fftpack import fft, ifft
+from numpy import hamming
 from torch.utils.data import DataLoader, random_split
 import torch as t
 import torch_optimizer as t_opt
@@ -53,3 +56,57 @@ def get_optimzer(optimizer_name, model, lr):
         optimizer = t.optim.SGD(model.parameters(), lr)
 
     return optimizer
+
+def sig2spec(src, fft_size, shift_size, window='hamming'):
+    """
+    Parameters
+    ----------
+    signal: input signal
+    fft_size: frame length
+    shift_size: frame shift
+    window: window function
+    Returns
+    -------
+    S: spectrogram of input signal (fft_size/2+1 x frame x ch)
+    """
+
+    signal = np.array(src)
+
+    if window == 'hamming':
+        window = hamming(fft_size+1)[:fft_size]
+    else:
+        print(window+' is not supported.')
+        sys.exit(0)
+
+    zeroPadSize = fft_size - shift_size
+    length = signal.shape[0]
+    frames = int(np.floor((length + fft_size - 1) / shift_size))
+    I = int(fft_size/2 + 1)
+
+    if len(signal.shape) == 1:
+        # monoral
+        signal = np.concatenate([np.zeros(zeroPadSize), signal, np.zeros(fft_size)])
+        S = np.zeros([I, frames], dtype=np.complex128)
+
+        for j in range(frames):
+            sp = j * shift_size
+            spectrum = fft(signal[sp: sp+fft_size] * window)
+            S[:, j] = spectrum[:I]
+
+        return S
+
+    elif len(signal.shape) == 2:
+        nch = signal.shape[1]
+        signal = np.concatenate([np.zeros([zeroPadSize, nch]), signal, np.zeros([fft_size,nch])])
+        S = np.zeros([I, frames, nch], dtype=np.complex128)
+
+        for ch in range(nch):
+            for j in range(frames):
+                sp = j * shift_size
+                spectrum = fft(signal[sp: sp+fft_size, ch] * window)
+                S[:, j, ch] = spectrum[:I]
+
+        return S
+
+    else:
+        raise ValueError('illegal signal dimension')
