@@ -69,79 +69,51 @@ class Conv1dModel(ConvModel):
         )
 
 class Conv2dModel(ConvModel):
-    def __init__(self, h, w, channels, n_layers, conv_kernel, conv_stride, pool_kernel, pool_stride, h_dims, out_dim, p=0):
+    def __init__(self, out_dim, p=0):
         super().__init__()
 
-        self.h_out = 0
-        self.w_out = 0
+        input_size  = 384
+        hidden1     = 128
+        hidden2     = 128
+        hidden3     = 64
 
-        # 第1層
-        self.conv = nn.ModuleList([
-            nn.Sequential(
-                nn.Conv2d(in_channels=1, out_channels=channels[0], kernel_size=[conv_kernel,3], stride=[conv_stride,1], padding=[0,1]),
-                nn.BatchNorm2d(channels[0]),
-                nn.ReLU(),
-                nn.MaxPool2d(kernel_size=[pool_kernel, 1], stride=[pool_stride, 1], padding=0),
-            )
-        ])
+        self.conv = nn.Sequential(
+            nn.Conv2d(in_channels=3, out_channels=8, kernel_size=[3, 3], stride=[1, 1], padding=[0, 0]),
+            nn.BatchNorm2d(8),
+            nn.Mish(),
+            nn.MaxPool2d(kernel_size=2, padding=0),
 
-        h_ = self.calc_out_size(h, conv_kernel, conv_stride, 0)
-        h_ = self.calc_out_size(h_, pool_kernel, pool_stride, 0)
+            nn.Conv2d(in_channels=8, out_channels=16, kernel_size=[3, 3], stride=[1, 1], padding=[0, 0]),
+            nn.BatchNorm2d(16),
+            nn.Mish(),
+            nn.MaxPool2d(kernel_size=2, padding=0),
 
-        w_ = self.calc_out_size(w, 3, 1, 1)
-        w_ = self.calc_out_size(w_, 1, 1, 0)
-
-        # 2層目以降．
-        for i in range(n_layers-1):
-            self.conv.append(
-                nn.Sequential(
-                    nn.Conv2d(in_channels=channels[i], out_channels=channels[i+1], kernel_size=[conv_kernel,3], stride=[conv_stride,1], padding=[0,1]),
-                    nn.BatchNorm2d(channels[i+1]),
-                    nn.ReLU(),
-                    nn.MaxPool2d(kernel_size=[pool_kernel, 1], stride=[pool_stride, 1], padding=0),
-                )
-            )
-
-            h_ = self.calc_out_size(h_, conv_kernel, conv_stride, 0)
-            h_ = self.calc_out_size(h_, pool_kernel, pool_stride, 0)
-            w_ = self.calc_out_size(w_, 3, 1, 1)
-            w_ = self.calc_out_size(w_, 1, 1, 0)
-        
-        self.h_out = h_
-        self.w_out = w_
-
-        out_features = channels[n_layers-1]*self.h_out*self.w_out
+            nn.Conv2d(in_channels=16, out_channels=16, kernel_size=[3, 3], stride=[1, 1], padding=[0, 0]),
+            nn.BatchNorm2d(16),
+            nn.Mish(),
+            nn.MaxPool2d(kernel_size=2, padding=0),
+        )
 
         self.dense = nn.Sequential(
-            nn.Linear(out_features, h_dims[0]),
-            nn.BatchNorm1d(h_dims[0]),
-            nn.ReLU(),
+            nn.Linear(input_size, hidden1),
+            nn.BatchNorm1d(hidden1),
+            nn.Mish(),
             nn.Dropout(p),
 
-            nn.Linear(h_dims[0], h_dims[1]),
-            nn.BatchNorm1d(h_dims[1]),
-            nn.ReLU(),
+            nn.Linear(hidden1, hidden2),
+            nn.BatchNorm1d(hidden2),
+            nn.Mish(),
             nn.Dropout(p),
 
-            nn.Linear(h_dims[1], h_dims[2]),
-            nn.BatchNorm1d(h_dims[2]),
-            nn.ReLU(),
+            nn.Linear(hidden2, hidden2),
+            nn.BatchNorm1d(hidden2),
+            nn.Mish(),
             nn.Dropout(p),
 
-            nn.Linear(h_dims[2], h_dims[3]),
-            nn.BatchNorm1d(h_dims[3]),
-            nn.ReLU(),
+            nn.Linear(hidden2, hidden3),
+            nn.BatchNorm1d(hidden3),
+            nn.Mish(),
             nn.Dropout(p),
 
-            nn.Linear(h_dims[3], out_dim),
+            nn.Linear(hidden3, out_dim),
         )
-    def forward(self, x):
-
-        # conv.
-        for l in self.conv:
-            x = l(x)
-        
-        x = t.flatten(x, 1)  # flatten
-        x = self.dense(x)  # dense
-
-        return x

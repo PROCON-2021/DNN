@@ -98,27 +98,6 @@ def objective(trial):
     norm = trial.suggest_categorical("norm", [True, False])
     lr = trial.suggest_float('lr', 1e-5, 1e-2)
 
-    o_channel1 = trial.suggest_int('o_channel1', 2, 8)
-    o_channel2 = trial.suggest_int('o_channel2', o_channel1, 16)
-    o_channel3 = trial.suggest_int('o_channel3', o_channel2, 16)
-    o_channel4 = trial.suggest_int('o_channel4', o_channel3, 16)
-
-    h_dim1 = trial.suggest_int('h_dim1', 512, 1024)
-    h_dim2 = trial.suggest_int('h_dim2', 256, 512)
-    h_dim3 = trial.suggest_int('h_dim3', 128, 256)
-    h_dim4 = trial.suggest_int('h_dim4', 32, 128)
-
-    o_channels = [o_channel1, o_channel2, o_channel3, o_channel4]
-    h_dims = [h_dim1, h_dim2, h_dim3, h_dim4]
-
-    layers = trial.suggest_int('layers', 2, len(o_channels))
-
-    conv_kernel = trial.suggest_int('conv_kernel', 1, 3)
-    conv_stride = trial.suggest_int('conv_stride', 1, 2)
-
-    pool_kernel = trial.suggest_int('pool_kernel', 1, 4)
-    pool_stride = trial.suggest_int('pool_stride', 1, 4)
-
     config = dict(
         batch = batch_size,
         dropout = dropout,
@@ -126,14 +105,6 @@ def objective(trial):
         learning_rate = lr,
         best_val_acc = 0,
         pruned = False,
-        conv_channels = o_channels,
-        hidden_dims = h_dims,
-        layers = layers,
-        conv_kernel = conv_kernel,
-        conv_stride = conv_stride,
-        pool_kernel = pool_kernel,
-        pool_stride = pool_stride,
-        norm = norm,
     )
 
     run = wandb.init(project=args.type, config=config, reinit=True)
@@ -143,8 +114,8 @@ def objective(trial):
     out_dir = '/'.join(path.parts[0:-1])
 
     # Dataset =====================================================
-    train_dataset = TrainValDataset(f'./dataset/{args.type}/train', args.type, norm)
-    val_dataset = TrainValDataset(f'./dataset/{args.type}/val', args.type, norm)
+    train_dataset = TrainValDataset(f'./dataset/{args.type}/train', args.type)
+    val_dataset = TrainValDataset(f'./dataset/{args.type}/val', args.type)
 
     train_loader = DataLoader(train_dataset, batch_size, shuffle=True, num_workers=args.workers)
     valid_loader = DataLoader(val_dataset, batch_size, shuffle=False, num_workers=args.workers)
@@ -158,8 +129,7 @@ def objective(trial):
         _, c, l = data.shape
 
     out_dim = len(train_dataset.label)
-    # model = Conv1dModel(out_dim=out_dim, p=dropout).to(device)
-    model = Conv2dModel(h, w, o_channels, layers, conv_kernel, conv_stride, pool_kernel, pool_stride, h_dims, out_dim, p=dropout).to(device)
+    model = Conv2dModel(out_dim=out_dim, p=dropout).to(device)
 
     # DEBUG
     # summary(model, (1, h, w))
@@ -199,7 +169,7 @@ def objective(trial):
 
 if __name__ == "__main__":
 
-    MAX_EPOCH = 2000
+    MAX_EPOCH = 10
 
     # GPUが利用可能か確認
     device = 'cuda' if t.cuda.is_available() else 'cpu'
