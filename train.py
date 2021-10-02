@@ -98,7 +98,7 @@ def objective(trial):
     dropout = trial.suggest_float('dropout', 0.1, 0.5)
     # optimizer_name = trial.suggest_categorical("optimizer", ['Adam', 'RAdam'])
     lr = trial.suggest_float('lr', 1e-5, 1e-2)
-    fft_size = trial.categorical('fft_size', 16, 32, 64, 128)
+    fft_size = trial.suggest_categorical('fft_size', [16, 32, 64, 128])
 
     # batch_size = 34
     # dropout =  0.3
@@ -175,9 +175,11 @@ def objective(trial):
         acc = valid_step(valid_loader, model)
 
         run.log({'Validation accuracy': acc, 'Epoch': epoch+1})
-        run.config.update({'best_val_acc': acc if acc > best_val_acc else best_val_acc}, allow_val_change=True)
 
-        early_stopping(acc, model)
+        best_val_acc = acc if acc > best_val_acc else best_val_acc
+        run.config.update({'best_val_acc': best_val_acc}, allow_val_change=True)
+
+        early_stopping(best_val_acc, model)
 
         trial.report(acc, epoch)
 
@@ -193,7 +195,7 @@ def objective(trial):
     export_network(model, wandb.run.dir)
     run.finish()
 
-    return acc
+    return best_val_acc
 
 if __name__ == "__main__":
 
