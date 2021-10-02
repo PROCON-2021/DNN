@@ -4,6 +4,7 @@ import wandb
 from pathlib import Path
 import optuna
 import argparse
+import matplotlib.pyplot as plt
 
 # PyTorch
 import torch as t
@@ -11,7 +12,8 @@ import torch.nn as nn
 import torch.optim as optim
 from torch.utils.data import DataLoader
 from torchsummary import summary
-t.manual_seed(0)
+from torchvision import models
+t.manual_seed(3407)
 
 # 自作モジュール
 from common.earlystopping import EarlyStopping
@@ -92,17 +94,24 @@ def valid_step(dataloader, model):
 def objective(trial):
 
     # ハイパーパラメータ
-    batch_size = trial.suggest_int('batch_size', 10, 50)
+    batch_size = trial.suggest_int('batch_size', 8, 64)
     dropout = trial.suggest_float('dropout', 0.1, 0.5)
-    optimizer_name = trial.suggest_categorical("optimizer", ['Adam', 'RAdam'])
-    norm = trial.suggest_categorical("norm", [True, False])
+    # optimizer_name = trial.suggest_categorical("optimizer", ['Adam', 'RAdam'])
     lr = trial.suggest_float('lr', 1e-5, 1e-2)
+    fft_size = trial.categorical('fft_size', 16, 32, 64, 128)
+
+    # batch_size = 34
+    # dropout =  0.3
+    # optimizer_name = 'Adam'
+    # lr = 0.001
+    # fft_size = 64
 
     config = dict(
         batch = batch_size,
         dropout = dropout,
-        optimizer = optimizer_name,
+        # optimizer = optimizer_name,
         learning_rate = lr,
+        fft_size = fft_size,
         best_val_acc = 0,
         pruned = False,
     )
@@ -129,14 +138,33 @@ def objective(trial):
         _, c, l = data.shape
 
     out_dim = len(train_dataset.label)
-    model = Conv2dModel(out_dim=out_dim, p=dropout).to(device)
+    model = Conv2dModel(out_dim=out_dim, p=0.5).to(device)
+
+    # model = models.resnet152(pretrained=True)
+
+    # for param in model.parameters():
+    #     param.requires_grad = False
+    
+    # num_ftrs = model.fc.in_features
+    # num_ftrs = model.classifier[6].in_features
+    # model.classifier[6] = nn.Linear(num_ftrs, out_dim) 
+    # model.fc = nn.Linear(num_ftrs, out_dim)
+
+    # model.fc = nn.Sequential(nn.Dropout(p=dropout), model.fc)
+    # model.layer4[1] = nn.Sequential(nn.Dropout(p=dropout), model.layer4[1])
+    # model.layer4[2] = nn.Sequential(nn.Dropout(p=dropout), model.layer4[2])
+
+    # model = model.to(device)
+
+    # print(model)
 
     # DEBUG
-    # summary(model, (1, h, w))
+    # summary(model, (3, h, w))
     
     early_stopping = EarlyStopping(args.patience, verbose=True, out_dir=out_dir, key='max')
 
-    optimizer = get_optimzer(optimizer_name, model, lr)
+    # optimizer = get_optimzer(optimizer_name, model, lr)
+    optimizer = t.optim.Adam(model.parameters(), lr=lr, weight_decay=1e-4)
 
     acc = 0
     best_val_acc = 0
@@ -169,7 +197,7 @@ def objective(trial):
 
 if __name__ == "__main__":
 
-    MAX_EPOCH = 10
+    MAX_EPOCH = 100
 
     # GPUが利用可能か確認
     device = 'cuda' if t.cuda.is_available() else 'cpu'
