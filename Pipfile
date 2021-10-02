@@ -13,6 +13,8 @@ cloudpickle = "*"
 wandb = "*"
 torchsummary = "*"
 torch-optimizer = "*"
+matplotlib = "*"
+sklearn = "*"
 
 [dev-packages]
 
