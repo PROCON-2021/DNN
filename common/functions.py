@@ -5,6 +5,7 @@ from numpy import hamming
 from torch.utils.data import DataLoader, random_split
 import torch as t
 import torch_optimizer as t_opt
+import matplotlib.pyplot as plt
 
 # モデルのネットワーク構造をtxt形式で出力
 def export_network(model, out_dir) -> None:
@@ -110,3 +111,87 @@ def sig2spec(src, fft_size, shift_size, window='hamming'):
 
     else:
         raise ValueError('illegal signal dimension')
+
+def show_spec(spec, fs=16000, fft_size=2048, shift_size=1024, xrange=None, yrange=None, cbar=False, output=None, imshow=False, plot_type='log'):
+    '''
+    Parameters
+    ----------------
+    spec: Specetrogram (1ch absolute scale)
+    fs: Sampling frequency
+    fft_size: FFT length
+    shift_size: overlap length
+    xrange: Range of X axis (list [x min, x max])
+    yrange: Range of Y axis (same format as xrange)
+    crange: Range of Colorbar (list [min(db), max(db)])
+    cbar: Whether show color bar or not
+    output: Output file name 
+    imshow: Preview in program (Does not work on remote env.)
+    '''
+
+    if len(spec.shape) == 1:
+        spec = spec.reshape([spec.shape[0],1])
+        I = spec.shape[0]
+        J = 1
+    else:
+        I, J = spec.shape
+
+    if fft_size is None:
+        fft_size = (I - 1) * 2
+    if shift_size is None:
+        shift_size = fft_size // 2
+
+    t = np.round((J * shift_size - fft_size + 1) / fs)+1
+
+    # x-y axis range
+    if xrange == None:
+        x_min = 0
+        x_max = t  
+    else:
+        x_min = xrange[0]
+        x_max = xrange[1]
+
+    if yrange == None:
+        y_min = fs // 2
+        y_max = 0
+    else:
+        y_min = yrange[1]
+        y_max = yrange[0]
+
+    ax_range = [x_min, x_max, y_min, y_max]
+
+    plt.figure()
+
+    if plot_type == 'log':
+        epsilon = sys.float_info.epsilon
+        S = np.where(spec < epsilon, spec+epsilon, spec) # フロアリング
+        plt.imshow(20*np.log10(S), extent=ax_range, aspect='auto', cmap='cividis', interpolation='nearest')
+    elif plot_type == 'default':
+        plt.imshow(spec, extent=ax_range, aspect='auto', cmap='cividis', interpolation='nearest')
+
+    if cbar:
+        plt.colorbar()
+
+    plt.gca().invert_yaxis()
+    
+    plt.xlabel('Time [s]')
+    plt.ylabel('Frequency [Hz]')
+
+    if output != None:
+        plt.savefig(output, bbox_inches='tight', dpi=300)
+    
+    if imshow is True:
+        plt.show()
+
+    plt.close()
+
+def opt_syn_wnd(analysis_window, shift_size):
+    fft_size = analysis_window.shape[0]
+    synthesized_window = np.zeros(fft_size)
+    for i in range(shift_size):
+        amp = 0
+        for j in range(1, int(fft_size / shift_size) + 1):
+            amp += analysis_window[i + (j-1) * shift_size] ** 2
+        for j in range(1, int(fft_size / shift_size) + 1):
+            synthesized_window[i + (j-1) * shift_size] = analysis_window[i + (j-1) * shift_size] / amp
+
+    return synthesized_window
